@@ -3,9 +3,16 @@ const Assignment = require("../models/Assignment");
 const Student = require("../models/Student");
 const { notifyStudents } = require("../utils/notify");
 
-// @desc    Create an assignment, optionally with uploaded PDF/image files
+const allowedStudentIds = async (req) => {
+  const filter = req.user.role === "admin" ? {} : { assignedTeacher: req.user._id };
+  const students = await Student.find(filter).select("_id");
+  return students.map((s) => s._id.toString());
+};
+
+// @desc    Create an assignment, optionally with uploaded PDF/image files.
+//          Teachers may only assign to their own students.
 // @route   POST /api/assignments
-// @access  Teacher
+// @access  Staff (Admin or Teacher)
 const createAssignment = asyncHandler(async (req, res) => {
   const { title, description, class: className, submissionDate, studentIds } = req.body;
 
@@ -14,12 +21,24 @@ const createAssignment = asyncHandler(async (req, res) => {
     throw new Error("Please fill in all required assignment fields");
   }
 
+  const allowedIds = await allowedStudentIds(req);
+
   let students = studentIds;
-  if (!students || students.length === 0) {
-    const classStudents = await Student.find({ class: className, status: "Active" }).select("_id");
+  if (students && typeof students === "string") students = JSON.parse(students);
+
+  if (students && students.length > 0) {
+    const invalid = students.filter((id) => !allowedIds.includes(id.toString()));
+    if (invalid.length > 0) {
+      res.status(403);
+      throw new Error("Access denied: one or more students are not assigned to you");
+    }
+  } else {
+    const filter =
+      req.user.role === "admin"
+        ? { class: className, status: "Active" }
+        : { class: className, status: "Active", assignedTeacher: req.user._id };
+    const classStudents = await Student.find(filter).select("_id");
     students = classStudents.map((s) => s._id);
-  } else if (typeof students === "string") {
-    students = JSON.parse(students);
   }
 
   const files = (req.files || []).map((file) => ({
@@ -50,9 +69,10 @@ const createAssignment = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: assignment });
 });
 
-// @desc    Get all assignments (optionally filtered by class)
+// @desc    Get assignments. Teacher only sees assignments touching their own
+//          students, trimmed to just their own students' entries.
 // @route   GET /api/assignments?class=
-// @access  Teacher
+// @access  Staff (Admin or Teacher)
 const getAssignments = asyncHandler(async (req, res) => {
   const query = {};
   if (req.query.class) query.class = req.query.class;
@@ -61,12 +81,27 @@ const getAssignments = asyncHandler(async (req, res) => {
     .populate("assignedStudents.student", "name studentId")
     .sort({ submissionDate: -1 });
 
-  res.json({ success: true, count: assignments.length, data: assignments });
+  if (req.user.role === "admin") {
+    return res.json({ success: true, count: assignments.length, data: assignments });
+  }
+
+  const allowedIds = await allowedStudentIds(req);
+  const scoped = assignments
+    .map((a) => {
+      const assignedStudents = a.assignedStudents.filter((s) =>
+        allowedIds.includes(s.student._id.toString())
+      );
+      if (assignedStudents.length === 0) return null;
+      return { ...a.toObject(), assignedStudents };
+    })
+    .filter(Boolean);
+
+  res.json({ success: true, count: scoped.length, data: scoped });
 });
 
-// @desc    Get a single assignment
+// @desc    Get a single assignment, scoped for teachers
 // @route   GET /api/assignments/:id
-// @access  Teacher or assigned student
+// @access  Staff (Admin or Teacher) or assigned student
 const getAssignmentById = asyncHandler(async (req, res) => {
   const assignment = await Assignment.findById(req.params.id).populate(
     "assignedStudents.student",
@@ -76,23 +111,41 @@ const getAssignmentById = asyncHandler(async (req, res) => {
     res.status(404);
     throw new Error("Assignment not found");
   }
+
+  if (req.userType === "staff" && req.user.role !== "admin") {
+    const allowedIds = await allowedStudentIds(req);
+    const assignedStudents = assignment.assignedStudents.filter((s) =>
+      allowedIds.includes(s.student._id.toString())
+    );
+    if (assignedStudents.length === 0) {
+      res.status(403);
+      throw new Error("Access denied: none of these students are assigned to you");
+    }
+    return res.json({ success: true, data: { ...assignment.toObject(), assignedStudents } });
+  }
+
   res.json({ success: true, data: assignment });
 });
 
-// @desc    Update a student's submission status for an assignment
+// @desc    Update a student's submission status (scoped for teachers)
 // @route   PUT /api/assignments/:id/status/:studentId
-// @body    { status: "Completed" | "Pending" | "Late Submission", teacherRemarks }
-// @access  Teacher
+// @access  Staff (Admin or Teacher)
 const updateSubmissionStatus = asyncHandler(async (req, res) => {
+  if (req.user.role !== "admin") {
+    const allowedIds = await allowedStudentIds(req);
+    if (!allowedIds.includes(req.params.studentId)) {
+      res.status(403);
+      throw new Error("Access denied: this student is not assigned to you");
+    }
+  }
+
   const assignment = await Assignment.findById(req.params.id);
   if (!assignment) {
     res.status(404);
     throw new Error("Assignment not found");
   }
 
-  const entry = assignment.assignedStudents.find(
-    (s) => s.student.toString() === req.params.studentId
-  );
+  const entry = assignment.assignedStudents.find((s) => s.student.toString() === req.params.studentId);
   if (!entry) {
     res.status(404);
     throw new Error("This student is not assigned to this assignment");
@@ -108,31 +161,35 @@ const updateSubmissionStatus = asyncHandler(async (req, res) => {
   res.json({ success: true, data: assignment });
 });
 
-// @desc    Delete an assignment
+// @desc    Delete an assignment. Admin, or the teacher who created it.
 // @route   DELETE /api/assignments/:id
-// @access  Teacher
+// @access  Staff (Admin or Teacher — creator only)
 const deleteAssignment = asyncHandler(async (req, res) => {
   const assignment = await Assignment.findById(req.params.id);
   if (!assignment) {
     res.status(404);
     throw new Error("Assignment not found");
   }
+
+  if (req.user.role !== "admin" && assignment.createdBy?.toString() !== req.user._id.toString()) {
+    res.status(403);
+    throw new Error("Access denied: you can only delete assignments you created");
+  }
+
   await assignment.deleteOne();
   res.json({ success: true, message: "Assignment deleted successfully" });
 });
 
-// @desc    Get the logged-in student's own assignments, with only their own status visible
+// @desc    Student's own assignments, with only their own status visible
 // @route   GET /api/assignments/my
 // @access  Student
 const getMyAssignments = asyncHandler(async (req, res) => {
-  const assignments = await Assignment.find({
-    "assignedStudents.student": req.user._id,
-  }).sort({ submissionDate: -1 });
+  const assignments = await Assignment.find({ "assignedStudents.student": req.user._id }).sort({
+    submissionDate: -1,
+  });
 
   const data = assignments.map((a) => {
-    const entry = a.assignedStudents.find(
-      (s) => s.student.toString() === req.user._id.toString()
-    );
+    const entry = a.assignedStudents.find((s) => s.student.toString() === req.user._id.toString());
     return {
       _id: a._id,
       title: a.title,

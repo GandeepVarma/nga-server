@@ -4,8 +4,8 @@ const cors = require("cors");
 const connectDB = require("./config/db");
 const { notFound, errorHandler } = require("./middleware/errorHandler");
 
-// Route modules
 const authRoutes = require("./routes/authRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 const studentRoutes = require("./routes/studentRoutes");
 const testRoutes = require("./routes/testRoutes");
 const assignmentRoutes = require("./routes/assignmentRoutes");
@@ -32,6 +32,7 @@ app.get("/api/health", (req, res) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRoutes);
 app.use("/api/students", studentRoutes);
 app.use("/api/tests", testRoutes);
 app.use("/api/assignments", assignmentRoutes);

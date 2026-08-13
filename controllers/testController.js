@@ -3,9 +3,19 @@ const Test = require("../models/Test");
 const Student = require("../models/Student");
 const { notifyStudents } = require("../utils/notify");
 
-// @desc    Create a new test for a class or a specific set of students
+// Returns the set of student _ids (as strings) a staff member is allowed to
+// touch: all active students for Admin, or only their own for a Teacher.
+const allowedStudentIds = async (req) => {
+  const filter = req.user.role === "admin" ? {} : { assignedTeacher: req.user._id };
+  const students = await Student.find(filter).select("_id");
+  return students.map((s) => s._id.toString());
+};
+
+// @desc    Create a new test for a class or a specific set of students.
+//          Teachers may only assign the test to their own students, even if
+//          other teachers' students share the same class name.
 // @route   POST /api/tests
-// @access  Teacher
+// @access  Staff (Admin or Teacher)
 const createTest = asyncHandler(async (req, res) => {
   const { testName, subject, class: className, maxMarks, date, studentIds } = req.body;
 
@@ -14,10 +24,23 @@ const createTest = asyncHandler(async (req, res) => {
     throw new Error("Please fill in all required test fields");
   }
 
-  // If no specific students given, assign to the whole class
-  let students = studentIds;
-  if (!students || students.length === 0) {
-    const classStudents = await Student.find({ class: className, status: "Active" }).select("_id");
+  const allowedIds = await allowedStudentIds(req);
+
+  let students;
+  if (studentIds && studentIds.length > 0) {
+    // Reject any student ID the requester isn't allowed to touch
+    const invalid = studentIds.filter((id) => !allowedIds.includes(id.toString()));
+    if (invalid.length > 0) {
+      res.status(403);
+      throw new Error("Access denied: one or more students are not assigned to you");
+    }
+    students = studentIds;
+  } else {
+    const filter =
+      req.user.role === "admin"
+        ? { class: className, status: "Active" }
+        : { class: className, status: "Active", assignedTeacher: req.user._id };
+    const classStudents = await Student.find(filter).select("_id");
     students = classStudents.map((s) => s._id);
   }
 
@@ -42,9 +65,12 @@ const createTest = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: test });
 });
 
-// @desc    Get all tests (optionally filtered by class)
+// @desc    Get tests. Admin sees every test in full. A Teacher only sees
+//          tests that include at least one of their own students, and the
+//          `marks` array is trimmed to just their own students' entries so
+//          no other teacher's student data leaks through.
 // @route   GET /api/tests?class=
-// @access  Teacher
+// @access  Staff (Admin or Teacher)
 const getTests = asyncHandler(async (req, res) => {
   const query = {};
   if (req.query.class) query.class = req.query.class;
@@ -53,33 +79,52 @@ const getTests = asyncHandler(async (req, res) => {
     .populate("marks.student", "name studentId")
     .sort({ date: -1 });
 
-  const withStats = tests.map((t) => ({
-    ...t.toObject(),
-    stats: t.getStats(),
-  }));
+  if (req.user.role === "admin") {
+    const withStats = tests.map((t) => ({ ...t.toObject(), stats: t.getStats() }));
+    return res.json({ success: true, count: withStats.length, data: withStats });
+  }
 
-  res.json({ success: true, count: tests.length, data: withStats });
+  const allowedIds = await allowedStudentIds(req);
+  const scoped = tests
+    .map((t) => {
+      const marks = t.marks.filter((m) => allowedIds.includes(m.student._id.toString()));
+      if (marks.length === 0) return null;
+      const scopedTest = { ...t.toObject(), marks };
+      return { ...scopedTest, stats: t.getStats() };
+    })
+    .filter(Boolean);
+
+  res.json({ success: true, count: scoped.length, data: scoped });
 });
 
-// @desc    Get single test with full details
+// @desc    Get single test — Teacher only sees their own students' marks
 // @route   GET /api/tests/:id
-// @access  Teacher
+// @access  Staff (Admin or Teacher)
 const getTestById = asyncHandler(async (req, res) => {
-  const test = await Test.findById(req.params.id).populate(
-    "marks.student",
-    "name studentId class"
-  );
+  const test = await Test.findById(req.params.id).populate("marks.student", "name studentId class");
   if (!test) {
     res.status(404);
     throw new Error("Test not found");
   }
-  res.json({ success: true, data: { ...test.toObject(), stats: test.getStats() } });
+
+  if (req.user.role === "admin") {
+    return res.json({ success: true, data: { ...test.toObject(), stats: test.getStats() } });
+  }
+
+  const allowedIds = await allowedStudentIds(req);
+  const marks = test.marks.filter((m) => allowedIds.includes(m.student._id.toString()));
+  if (marks.length === 0) {
+    res.status(403);
+    throw new Error("Access denied: none of these students are assigned to you");
+  }
+
+  res.json({ success: true, data: { ...test.toObject(), marks, stats: test.getStats() } });
 });
 
-// @desc    Enter or update marks for one or more students in a test
+// @desc    Enter or update marks. Teacher can only submit marks for
+//          students assigned to them — every ID is checked server-side.
 // @route   PUT /api/tests/:id/marks
-// @body    { marks: [{ studentId, marksObtained }] }
-// @access  Teacher
+// @access  Staff (Admin or Teacher)
 const updateMarks = asyncHandler(async (req, res) => {
   const test = await Test.findById(req.params.id);
   if (!test) {
@@ -93,13 +138,17 @@ const updateMarks = asyncHandler(async (req, res) => {
     throw new Error("marks must be an array of { studentId, marksObtained }");
   }
 
+  const allowedIds = await allowedStudentIds(req);
+  const invalid = marks.filter((m) => !allowedIds.includes(m.studentId.toString()));
+  if (invalid.length > 0) {
+    res.status(403);
+    throw new Error("Access denied: one or more students are not assigned to you");
+  }
+
   marks.forEach(({ studentId, marksObtained }) => {
     const entry = test.marks.find((m) => m.student.toString() === studentId);
-    if (entry) {
-      entry.marksObtained = marksObtained === "" ? null : marksObtained;
-    } else {
-      test.marks.push({ student: studentId, marksObtained });
-    }
+    if (entry) entry.marksObtained = marksObtained === "" ? null : marksObtained;
+    else test.marks.push({ student: studentId, marksObtained });
   });
 
   await test.save();
@@ -116,10 +165,16 @@ const updateMarks = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { ...test.toObject(), stats: test.getStats() } });
 });
 
-// @desc    Delete a single student's mark entry (reset to not-entered)
+// @desc    Clear a single student's mark entry (scoped)
 // @route   DELETE /api/tests/:id/marks/:studentId
-// @access  Teacher
+// @access  Staff (Admin or Teacher)
 const deleteMark = asyncHandler(async (req, res) => {
+  const allowedIds = await allowedStudentIds(req);
+  if (!allowedIds.includes(req.params.studentId)) {
+    res.status(403);
+    throw new Error("Access denied: this student is not assigned to you");
+  }
+
   const test = await Test.findById(req.params.id);
   if (!test) {
     res.status(404);
@@ -137,22 +192,29 @@ const deleteMark = asyncHandler(async (req, res) => {
   res.json({ success: true, message: "Mark entry cleared" });
 });
 
-// @desc    Delete a whole test
+// @desc    Delete a whole test. Only Admin, or the Teacher who created it.
 // @route   DELETE /api/tests/:id
-// @access  Teacher
+// @access  Staff (Admin or Teacher — creator only)
 const deleteTest = asyncHandler(async (req, res) => {
   const test = await Test.findById(req.params.id);
   if (!test) {
     res.status(404);
     throw new Error("Test not found");
   }
+
+  if (req.user.role !== "admin" && test.createdBy?.toString() !== req.user._id.toString()) {
+    res.status(403);
+    throw new Error("Access denied: you can only delete tests you created");
+  }
+
   await test.deleteOne();
   res.json({ success: true, message: "Test deleted successfully" });
 });
 
-// @desc    Compare two tests (e.g. previous vs current) for a class or student
+// @desc    Compare two tests. Results are scoped to the requester's own
+//          students unless they're Admin.
 // @route   GET /api/tests/compare?testA=&testB=
-// @access  Teacher
+// @access  Staff (Admin or Teacher)
 const compareTests = asyncHandler(async (req, res) => {
   const { testA, testB } = req.query;
   if (!testA || !testB) {
@@ -170,21 +232,18 @@ const compareTests = asyncHandler(async (req, res) => {
     throw new Error("One or both tests not found");
   }
 
-  const improvement = b.marks.map((entryB) => {
-    const entryA = a.marks.find(
-      (m) => m.student._id.toString() === entryB.student._id.toString()
-    );
-    const scoreA = entryA ? entryA.marksObtained : null;
-    const scoreB = entryB.marksObtained;
-    const change =
-      scoreA !== null && scoreB !== null ? Number((scoreB - scoreA).toFixed(2)) : null;
-    return {
-      student: entryB.student,
-      previousMarks: scoreA,
-      currentMarks: scoreB,
-      change,
-    };
-  });
+  const allowedIds = req.user.role === "admin" ? null : await allowedStudentIds(req);
+  const inScope = (studentId) => !allowedIds || allowedIds.includes(studentId.toString());
+
+  const improvement = b.marks
+    .filter((entryB) => inScope(entryB.student._id))
+    .map((entryB) => {
+      const entryA = a.marks.find((m) => m.student._id.toString() === entryB.student._id.toString());
+      const scoreA = entryA ? entryA.marksObtained : null;
+      const scoreB = entryB.marksObtained;
+      const change = scoreA !== null && scoreB !== null ? Number((scoreB - scoreA).toFixed(2)) : null;
+      return { student: entryB.student, previousMarks: scoreA, currentMarks: scoreB, change };
+    });
 
   res.json({
     success: true,
@@ -196,7 +255,7 @@ const compareTests = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc    Get the logged-in student's own tests, with only their own marks visible
+// @desc    Student's own tests, with only their own marks visible
 // @route   GET /api/tests/my
 // @access  Student
 const getMyTests = asyncHandler(async (req, res) => {

@@ -35,6 +35,17 @@ const studentSchema = new mongoose.Schema(
       required: [true, "Class is required"],
       trim: true,
     },
+    batch: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    // Every student belongs to exactly one teacher. Admin can reassign.
+    assignedTeacher: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Teacher",
+      required: [true, "Every student must be assigned to a teacher"],
+    },
     password: {
       type: String,
       required: [true, "Password is required"],

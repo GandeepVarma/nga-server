@@ -3,11 +3,13 @@ const Fee = require("../models/Fee");
 const Student = require("../models/Student");
 const { notifyStudent } = require("../utils/notify");
 
+// NOTE: Every route using this controller (except getMyFees) is mounted
+// behind `adminOnly` middleware — per RBAC rules, Teachers must not access
+// any fee data at all, so no additional scoping logic is needed here.
+
 // @desc    Generate this month's fee record for every active student
-//          (carries forward any pending balance from the previous month)
 // @route   POST /api/fees/generate
-// @body    { month: "2026-07" }
-// @access  Teacher
+// @access  Admin
 const generateMonthlyFees = asyncHandler(async (req, res) => {
   const { month } = req.body;
   if (!month) {
@@ -22,7 +24,6 @@ const generateMonthlyFees = asyncHandler(async (req, res) => {
     const exists = await Fee.findOne({ student: student._id, month });
     if (exists) continue;
 
-    // Find previous month's pending balance to carry forward
     const [year, m] = month.split("-").map(Number);
     const prevDate = new Date(year, m - 2, 1);
     const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
@@ -46,9 +47,9 @@ const generateMonthlyFees = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc    Get all fee records (optionally filtered by month/student/status)
+// @desc    Get all fee records (optionally filtered)
 // @route   GET /api/fees?month=&student=&status=
-// @access  Teacher
+// @access  Admin
 const getFees = asyncHandler(async (req, res) => {
   const { month, student, status } = req.query;
   const query = {};
@@ -56,10 +57,7 @@ const getFees = asyncHandler(async (req, res) => {
   if (student) query.student = student;
   if (status) query.status = status;
 
-  const fees = await Fee.find(query)
-    .populate("student", "name studentId class")
-    .sort({ month: -1 });
-
+  const fees = await Fee.find(query).populate("student", "name studentId class").sort({ month: -1 });
   res.json({ success: true, count: fees.length, data: fees });
 });
 
@@ -71,10 +69,9 @@ const getMyFees = asyncHandler(async (req, res) => {
   res.json({ success: true, data: fees });
 });
 
-// @desc    Record a payment (full or partial) against a fee record
+// @desc    Record a payment against a fee record
 // @route   PUT /api/fees/:id/pay
-// @body    { amount, modeOfPayment }
-// @access  Teacher
+// @access  Admin
 const recordPayment = asyncHandler(async (req, res) => {
   const { amount, modeOfPayment } = req.body;
   if (!amount || amount <= 0) {
@@ -105,9 +102,9 @@ const recordPayment = asyncHandler(async (req, res) => {
   res.json({ success: true, data: fee });
 });
 
-// @desc    Dashboard-style fee summary: total/pending/today's/month-wise/student-wise
+// @desc    Fee summary for the Admin dashboard
 // @route   GET /api/fees/summary
-// @access  Teacher
+// @access  Admin
 const getFeeSummary = asyncHandler(async (req, res) => {
   const fees = await Fee.find().populate("student", "name studentId class");
 
@@ -130,13 +127,7 @@ const getFeeSummary = asyncHandler(async (req, res) => {
   fees.forEach((f) => {
     const key = f.student?._id?.toString();
     if (!key) return;
-    if (!studentWise[key]) {
-      studentWise[key] = {
-        student: f.student,
-        collected: 0,
-        pending: 0,
-      };
-    }
+    if (!studentWise[key]) studentWise[key] = { student: f.student, collected: 0, pending: 0 };
     studentWise[key].collected += f.paid;
     studentWise[key].pending += f.pending;
   });
@@ -153,10 +144,4 @@ const getFeeSummary = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = {
-  generateMonthlyFees,
-  getFees,
-  getMyFees,
-  recordPayment,
-  getFeeSummary,
-};
+module.exports = { generateMonthlyFees, getFees, getMyFees, recordPayment, getFeeSummary };

@@ -7,12 +7,14 @@ const {
   recordPayment,
   getFeeSummary,
 } = require("../controllers/feeController");
-const { protect, teacherOnly, studentOnly } = require("../middleware/auth");
+const { protect, adminOnly, studentOnly } = require("../middleware/auth");
 
-router.post("/generate", protect, teacherOnly, generateMonthlyFees);
-router.get("/summary", protect, teacherOnly, getFeeSummary);
+// Per RBAC rules: Teachers have NO access to fee data whatsoever.
+// Every route below is Admin-only, except a student viewing their own fees.
+router.post("/generate", protect, adminOnly, generateMonthlyFees);
+router.get("/summary", protect, adminOnly, getFeeSummary);
 router.get("/my", protect, studentOnly, getMyFees);
-router.put("/:id/pay", protect, teacherOnly, recordPayment);
-router.get("/", protect, teacherOnly, getFees);
+router.put("/:id/pay", protect, adminOnly, recordPayment);
+router.get("/", protect, adminOnly, getFees);
 
 module.exports = router;

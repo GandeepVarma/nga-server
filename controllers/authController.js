@@ -3,38 +3,12 @@ const Teacher = require("../models/Teacher");
 const Student = require("../models/Student");
 const generateToken = require("../utils/generateToken");
 
-// @desc    Register the first teacher/admin account (used once during setup)
-// @route   POST /api/auth/teacher/register
-// @access  Public (should be disabled or protected after first use in production)
-const registerTeacher = asyncHandler(async (req, res) => {
-  const { name, email, password, phone } = req.body;
+// NOTE: There is deliberately NO public "register" endpoint for staff accounts.
+// Per RBAC rules, only the Main Admin can create teacher accounts (see
+// adminController.createTeacher). The very first Admin account is created via
+// the `npm run seed` script, not through the API.
 
-  if (!name || !email || !password) {
-    res.status(400);
-    throw new Error("Name, email and password are required");
-  }
-
-  const exists = await Teacher.findOne({ email });
-  if (exists) {
-    res.status(400);
-    throw new Error("A teacher with this email already exists");
-  }
-
-  const teacher = await Teacher.create({ name, email, password, phone });
-
-  res.status(201).json({
-    success: true,
-    data: {
-      _id: teacher._id,
-      name: teacher.name,
-      email: teacher.email,
-      role: teacher.role,
-      token: generateToken(teacher._id, "teacher"),
-    },
-  });
-});
-
-// @desc    Teacher login with email + password
+// @desc    Staff login (Admin or Teacher) with email + password
 // @route   POST /api/auth/teacher/login
 // @access  Public
 const loginTeacher = asyncHandler(async (req, res) => {
@@ -52,13 +26,18 @@ const loginTeacher = asyncHandler(async (req, res) => {
     throw new Error("Invalid email or password");
   }
 
+  if (!teacher.isActive) {
+    res.status(403);
+    throw new Error("This account has been deactivated. Contact the academy admin.");
+  }
+
   res.json({
     success: true,
     data: {
       _id: teacher._id,
       name: teacher.name,
       email: teacher.email,
-      role: teacher.role,
+      role: teacher.role, // "admin" | "teacher"
       profilePhoto: teacher.profilePhoto,
       token: generateToken(teacher._id, "teacher"),
     },
@@ -109,9 +88,10 @@ const loginStudent = asyncHandler(async (req, res) => {
 const getMe = asyncHandler(async (req, res) => {
   res.json({
     success: true,
-    role: req.userRole,
+    userType: req.userType, // "staff" | "student"
+    role: req.userType === "staff" ? req.user.role : "student", // "admin" | "teacher" | "student"
     data: req.user,
   });
 });
 
-module.exports = { registerTeacher, loginTeacher, loginStudent, getMe };
+module.exports = { loginTeacher, loginStudent, getMe };

@@ -16,11 +16,11 @@ router.get("/my", protect, studentOnly, getMyAssignments);
 router
   .route("/")
   .post(protect, teacherOnly, upload.array("files", 5), createAssignment)
-  .get(protect, getAssignments);
+  .get(protect, teacherOnly, getAssignments);
 
 router
   .route("/:id")
-  .get(protect, getAssignmentById)
+  .get(protect, teacherOnly, getAssignmentById)
   .delete(protect, teacherOnly, deleteAssignment);
 
 router.put("/:id/status/:studentId", protect, teacherOnly, updateSubmissionStatus);

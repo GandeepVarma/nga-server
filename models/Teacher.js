@@ -1,6 +1,9 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
+// Teacher collection holds both "admin" and "teacher" role accounts.
+// role === "admin"   -> Main Admin, full academy access
+// role === "teacher" -> regular teacher, restricted to assigned students
 const teacherSchema = new mongoose.Schema(
   {
     name: {
@@ -20,7 +23,7 @@ const teacherSchema = new mongoose.Schema(
       type: String,
       required: [true, "Password is required"],
       minlength: 6,
-      select: false, // never return password by default
+      select: false,
     },
     role: {
       type: String,
@@ -31,6 +34,10 @@ const teacherSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
     profilePhoto: {
       type: String,
       default: "",
@@ -39,7 +46,6 @@ const teacherSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Hash password before saving
 teacherSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
   const salt = await bcrypt.genSalt(10);
@@ -47,7 +53,6 @@ teacherSchema.pre("save", async function (next) {
   next();
 });
 
-// Instance method to compare passwords during login
 teacherSchema.methods.matchPassword = async function (enteredPassword) {
   return bcrypt.compare(enteredPassword, this.password);
 };
