@@ -13,6 +13,7 @@ const feeRoutes = require("./routes/feeRoutes");
 const attendanceRoutes = require("./routes/attendanceRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const onlineTestRoutes = require("./routes/onlineTestRoutes");
 
 connectDB();
 
@@ -40,6 +41,7 @@ app.use("/api/fees", feeRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/online-tests", onlineTestRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
