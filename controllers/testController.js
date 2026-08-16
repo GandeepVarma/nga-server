@@ -2,6 +2,8 @@ const asyncHandler = require("express-async-handler");
 const Test = require("../models/Test");
 const Student = require("../models/Student");
 const { notifyStudents } = require("../utils/notify");
+const whatsapp = require("../services/whatsappService");
+const Settings = require("../models/Settings");
 
 // Returns the set of student _ids (as strings) a staff member is allowed to
 // touch: all active students for Admin, or only their own for a Teacher.
@@ -161,6 +163,27 @@ const updateMarks = asyncHandler(async (req, res) => {
     `Your marks for ${test.subject} (${test.testName}) have been uploaded.`,
     test._id
   );
+
+  // Fire WhatsApp result notifications in the background — only for marks
+  // that were actually entered (not cleared to null) in this call.
+  Settings.getSingleton()
+    .then(async (settings) => {
+      if (!settings.whatsapp.notificationsEnabled.resultNotification) return;
+      const graded = marks.filter((m) => m.marksObtained !== "" && m.marksObtained !== null);
+      if (graded.length === 0) return;
+      const studentDocs = await Student.find({ _id: { $in: graded.map((m) => m.studentId) } });
+      await Promise.all(
+        graded.map((m) => {
+          const student = studentDocs.find((s) => s._id.toString() === m.studentId.toString());
+          if (!student) return null;
+          const percentage = Number(((m.marksObtained / test.maxMarks) * 100).toFixed(1));
+          return whatsapp.sendResultNotification({
+            student, subject: test.subject, score: m.marksObtained, maxMarks: test.maxMarks, percentage,
+          });
+        })
+      );
+    })
+    .catch((err) => console.error("[whatsapp] result notification failed:", err.message));
 
   res.json({ success: true, data: { ...test.toObject(), stats: test.getStats() } });
 });

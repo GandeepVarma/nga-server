@@ -25,6 +25,21 @@ const studentSchema = new mongoose.Schema(
       required: [true, "Phone number is required"],
       trim: true,
     },
+    parentWhatsapp: {
+      type: String,
+      trim: true,
+      default: "", // defaults to `phone` at send-time if left blank
+    },
+    studentWhatsapp: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    preferredLanguage: {
+      type: String,
+      enum: ["English", "Telugu"],
+      default: "English",
+    },
     dateOfJoining: {
       type: Date,
       required: true,

@@ -11,7 +11,7 @@ const { notifyStudent } = require("../utils/notify");
 // @route   POST /api/fees/generate
 // @access  Admin
 const generateMonthlyFees = asyncHandler(async (req, res) => {
-  const { month } = req.body;
+  const { month, dueDate } = req.body;
   if (!month) {
     res.status(400);
     throw new Error("month is required, format YYYY-MM");
@@ -36,6 +36,7 @@ const generateMonthlyFees = asyncHandler(async (req, res) => {
       amount: student.monthlyFee,
       carryForward,
       paid: 0,
+      dueDate: dueDate || null, // powers the WhatsApp fee reminder scheduler, if set
     });
     created.push(fee);
   }
@@ -144,4 +145,27 @@ const getFeeSummary = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { generateMonthlyFees, getFees, getMyFees, recordPayment, getFeeSummary };
+// @desc    Manually send a WhatsApp fee reminder for a single record
+//          (in addition to the automated scheduled reminders)
+// @route   POST /api/fees/:id/remind
+// @access  Admin
+const sendManualReminder = asyncHandler(async (req, res) => {
+  const fee = await Fee.findById(req.params.id).populate("student");
+  if (!fee) {
+    res.status(404);
+    throw new Error("Fee record not found");
+  }
+  if (!fee.student) {
+    res.status(404);
+    throw new Error("This fee record has no linked student");
+  }
+
+  const whatsapp = require("../services/whatsappService");
+  // Manual sends use a unique dedupeKey each time (no offsetLabel) so they
+  // never collide with the scheduler's automated -3d/-1d/0d/+3d/+7d reminders.
+  const log = await whatsapp.sendFeeReminder({ fee, student: fee.student, offsetLabel: null });
+
+  res.json({ success: log.status === "sent", data: log });
+});
+
+module.exports = { generateMonthlyFees, getFees, getMyFees, recordPayment, getFeeSummary, sendManualReminder };

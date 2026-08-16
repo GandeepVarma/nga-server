@@ -6,6 +6,7 @@ const {
   getMyFees,
   recordPayment,
   getFeeSummary,
+  sendManualReminder,
 } = require("../controllers/feeController");
 const { protect, adminOnly, studentOnly } = require("../middleware/auth");
 
@@ -15,6 +16,7 @@ router.post("/generate", protect, adminOnly, generateMonthlyFees);
 router.get("/summary", protect, adminOnly, getFeeSummary);
 router.get("/my", protect, studentOnly, getMyFees);
 router.put("/:id/pay", protect, adminOnly, recordPayment);
+router.post("/:id/remind", protect, adminOnly, sendManualReminder);
 router.get("/", protect, adminOnly, getFees);
 
 module.exports = router;

@@ -1,6 +1,8 @@
 const asyncHandler = require("express-async-handler");
 const Attendance = require("../models/Attendance");
 const Student = require("../models/Student");
+const whatsapp = require("../services/whatsappService");
+const Settings = require("../models/Settings");
 
 const allowedStudentIds = async (req) => {
   const filter = req.user.role === "admin" ? {} : { assignedTeacher: req.user._id };
@@ -39,6 +41,18 @@ const markAttendance = asyncHandler(async (req, res) => {
     );
     results.push(record);
   }
+
+  // Fire WhatsApp absent alerts in the background — never blocks the
+  // response, and a failure here must never break attendance marking itself.
+  Settings.getSingleton()
+    .then(async (settings) => {
+      if (!settings.whatsapp.notificationsEnabled.attendanceAlert) return;
+      const absentIds = records.filter((r) => r.status === "Absent").map((r) => r.studentId);
+      if (absentIds.length === 0) return;
+      const absentStudents = await Student.find({ _id: { $in: absentIds } });
+      await Promise.all(absentStudents.map((s) => whatsapp.sendAttendanceAlert({ student: s, date })));
+    })
+    .catch((err) => console.error("[whatsapp] attendance alert failed:", err.message));
 
   res.status(201).json({ success: true, data: results });
 });

@@ -14,6 +14,8 @@ const attendanceRoutes = require("./routes/attendanceRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const onlineTestRoutes = require("./routes/onlineTestRoutes");
+const whatsappRoutes = require("./routes/whatsappRoutes");
+const { startScheduledJobs } = require("./jobs/notificationScheduler");
 
 connectDB();
 
@@ -42,6 +44,7 @@ app.use("/api/attendance", attendanceRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/online-tests", onlineTestRoutes);
+app.use("/api/whatsapp", whatsappRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
@@ -49,4 +52,5 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`NextGen Learning Academy API running on port ${PORT}`);
+  startScheduledJobs();
 });

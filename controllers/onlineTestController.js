@@ -2,6 +2,8 @@ const asyncHandler = require("express-async-handler");
 const OnlineTest = require("../models/OnlineTest");
 const Submission = require("../models/Submission");
 const Student = require("../models/Student");
+const whatsapp = require("../services/whatsappService");
+const Settings = require("../models/Settings");
 
 // A teacher may only build tests for classes where they actually have
 // assigned students — prevents a teacher from silently reaching students
@@ -156,6 +158,17 @@ const setPublishStatus = asyncHandler(async (req, res) => {
 
   test.published = !!req.body.publish;
   await test.save();
+
+  if (test.published) {
+    Settings.getSingleton()
+      .then(async (settings) => {
+        if (!settings.whatsapp.notificationsEnabled.testAnnouncement) return;
+        const students = await Student.find({ class: { $in: test.classes }, status: "Active" });
+        await Promise.all(students.map((s) => whatsapp.sendTestAnnouncement({ student: s, test })));
+      })
+      .catch((err) => console.error("[whatsapp] test announcement failed:", err.message));
+  }
+
   res.json({ success: true, data: test });
 });
 

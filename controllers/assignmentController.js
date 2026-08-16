@@ -2,6 +2,8 @@ const asyncHandler = require("express-async-handler");
 const Assignment = require("../models/Assignment");
 const Student = require("../models/Student");
 const { notifyStudents } = require("../utils/notify");
+const whatsapp = require("../services/whatsappService");
+const Settings = require("../models/Settings");
 
 const allowedStudentIds = async (req) => {
   const filter = req.user.role === "admin" ? {} : { assignedTeacher: req.user._id };
@@ -65,6 +67,17 @@ const createAssignment = asyncHandler(async (req, res) => {
     `A new assignment has been posted. Due: ${new Date(submissionDate).toDateString()}.`,
     assignment._id
   );
+
+  // Fire immediate WhatsApp homework alerts in the background (a separate
+  // 1-day-before reminder is also sent by the scheduled job for anyone
+  // still Pending — dedupeKey prevents that from double-sending this one).
+  Settings.getSingleton()
+    .then(async (settings) => {
+      if (!settings.whatsapp.notificationsEnabled.homeworkReminder) return;
+      const studentDocs = await Student.find({ _id: { $in: students } });
+      await Promise.all(studentDocs.map((s) => whatsapp.sendHomeworkReminder({ student: s, assignment })));
+    })
+    .catch((err) => console.error("[whatsapp] homework reminder failed:", err.message));
 
   res.status(201).json({ success: true, data: assignment });
 });
