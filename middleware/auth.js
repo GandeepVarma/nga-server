@@ -2,10 +2,12 @@ const jwt = require("jsonwebtoken");
 const asyncHandler = require("express-async-handler");
 const Teacher = require("../models/Teacher");
 const Student = require("../models/Student");
+const Academy = require("../models/Academy");
 
 // Verifies the JWT and attaches the authenticated user to req.user.
-// req.userType is "staff" (a Teacher-collection account, admin or teacher)
-// or "student". req.user.role holds "admin" | "teacher" for staff accounts.
+// req.userType is "staff" (a Teacher-collection account — teacher, admin,
+// or super_admin) or "student". req.user.role holds "teacher" | "admin" |
+// "super_admin" for staff accounts.
 const protect = asyncHandler(async (req, res, next) => {
   let token;
 
@@ -39,6 +41,20 @@ const protect = asyncHandler(async (req, res, next) => {
       throw new Error("This account has been deactivated. Contact the academy admin.");
     }
 
+    // Phase 1 "basic access blocking": if this staff member belongs to an
+    // Academy and that Academy is not ACTIVE (still PENDING/APPROVED
+    // approval, REJECTED, or SUSPENDED by Super Admin), block every
+    // request — not just login. This does NOT yet filter which data they
+    // see (that's the Phase 2 tenant-isolation work); it only stops
+    // non-active academies' staff from using the app.
+    if (req.userType === "staff" && req.user.academyId) {
+      const academy = await Academy.findById(req.user.academyId).select("status");
+      if (academy && academy.status !== "ACTIVE") {
+        res.status(403);
+        throw new Error(`This academy is currently ${academy.status.toLowerCase()}. Please contact support.`);
+      }
+    }
+
     // Backwards-compatible alias used by existing route files
     req.userRole = req.userType === "staff" ? "teacher" : "student";
 
@@ -49,8 +65,8 @@ const protect = asyncHandler(async (req, res, next) => {
   }
 });
 
-// Restricts a route to any authenticated staff account (admin or teacher),
-// regardless of which of the two specific roles they hold.
+// Restricts a route to any authenticated staff account (teacher, admin, or
+// super_admin), regardless of which specific role they hold.
 const teacherOnly = (req, res, next) => {
   if (req.userType !== "staff") {
     res.status(403);
@@ -80,5 +96,6 @@ const authorizeRoles = (...roles) => {
 };
 
 const adminOnly = authorizeRoles("admin");
+const superAdminOnly = authorizeRoles("super_admin");
 
-module.exports = { protect, teacherOnly, studentOnly, authorizeRoles, adminOnly };
+module.exports = { protect, teacherOnly, studentOnly, authorizeRoles, adminOnly, superAdminOnly };

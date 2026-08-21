@@ -1,18 +1,39 @@
 const asyncHandler = require("express-async-handler");
 const Teacher = require("../models/Teacher");
 const Student = require("../models/Student");
+const Academy = require("../models/Academy");
 const generateToken = require("../utils/generateToken");
 
-// NOTE: There is deliberately NO public "register" endpoint for staff accounts.
-// Per RBAC rules, only the Main Admin can create teacher accounts (see
-// adminController.createTeacher). The very first Admin account is created via
-// the `npm run seed` script, not through the API.
+// NOTE: There is deliberately NO public "register" endpoint for staff
+// accounts directly. Academy Admin accounts are created two ways: by
+// Super Admin (Create Academy) or via public self-registration
+// (POST /api/public/register-academy) — both go through
+// superAdminController/publicController, never a raw "create teacher" endpoint.
 
-// @desc    Staff login (Admin or Teacher) with email + password
+// Shared helper: verifies `academy.status === "ACTIVE"`. Called from every
+// login path so a PENDING/REJECTED/SUSPENDED academy's staff or students
+// can't log in even if their password is correct.
+const assertAcademyActive = async (academyId) => {
+  if (!academyId) return; // no academy attached (e.g. super_admin, or pre-SaaS legacy accounts) — nothing to check
+  const academy = await Academy.findById(academyId).select("status");
+  if (academy && academy.status !== "ACTIVE") {
+    const err = new Error(`This academy is currently ${academy.status.toLowerCase()}. Please contact support.`);
+    err.status = 403;
+    throw err;
+  }
+};
+
+// @desc    Staff login (Academy Admin or Teacher — NOT Super Admin, see
+//          loginSuperAdmin below for that separate flow). Accepts an
+//          optional `academyId` — when provided (i.e. login came from the
+//          academy-login dropdown flow), the authenticated account's own
+//          academyId is verified to match it server-side. The academyId in
+//          the request is NEVER trusted on its own; it's only ever compared
+//          against the value already stored on the account in the database.
 // @route   POST /api/auth/teacher/login
 // @access  Public
 const loginTeacher = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, academyId } = req.body;
 
   if (!email || !password) {
     res.status(400);
@@ -26,9 +47,26 @@ const loginTeacher = asyncHandler(async (req, res) => {
     throw new Error("Invalid email or password");
   }
 
+  if (teacher.role === "super_admin") {
+    res.status(403);
+    throw new Error("Super Admin accounts must use the Super Admin login page.");
+  }
+
   if (!teacher.isActive) {
     res.status(403);
     throw new Error("This account has been deactivated. Contact the academy admin.");
+  }
+
+  if (academyId && teacher.academyId?.toString() !== academyId) {
+    res.status(403);
+    throw new Error("This account does not belong to the selected academy.");
+  }
+
+  try {
+    await assertAcademyActive(teacher.academyId);
+  } catch (err) {
+    res.status(err.status || 403);
+    throw err;
   }
 
   res.json({
@@ -37,18 +75,56 @@ const loginTeacher = asyncHandler(async (req, res) => {
       _id: teacher._id,
       name: teacher.name,
       email: teacher.email,
-      role: teacher.role, // "admin" | "teacher"
+      role: teacher.role, // "teacher" | "admin"
+      academyId: teacher.academyId,
       profilePhoto: teacher.profilePhoto,
       token: generateToken(teacher._id, "teacher"),
     },
   });
 });
 
-// @desc    Student login with Student ID + password
+// @desc    Super Admin login — deliberately a separate endpoint from staff
+//          login, not just a role check on the same one, so it can never
+//          be reached from the academy-branded login pages by accident.
+// @route   POST /api/auth/super-admin/login
+// @access  Public
+const loginSuperAdmin = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    res.status(400);
+    throw new Error("Email and password are required");
+  }
+
+  const account = await Teacher.findOne({ email, role: "super_admin" }).select("+password");
+
+  if (!account || !(await account.matchPassword(password))) {
+    res.status(401);
+    throw new Error("Invalid Super Admin email or password");
+  }
+
+  res.json({
+    success: true,
+    data: {
+      _id: account._id,
+      name: account.name,
+      email: account.email,
+      role: "super_admin",
+      token: generateToken(account._id, "teacher"),
+    },
+  });
+});
+
+// @desc    Student login with Student ID + password. Accepts an optional
+//          `academyId` (from the academy-login dropdown flow) — verified
+//          server-side by tracing the student's assignedTeacher's own
+//          academyId, since Student doesn't carry academyId directly yet
+//          (full per-collection tenant tagging is Phase 2). The frontend's
+//          academyId is never trusted on its own.
 // @route   POST /api/auth/student/login
 // @access  Public
 const loginStudent = asyncHandler(async (req, res) => {
-  const { studentId, password } = req.body;
+  const { studentId, password, academyId } = req.body;
 
   if (!studentId || !password) {
     res.status(400);
@@ -57,7 +133,7 @@ const loginStudent = asyncHandler(async (req, res) => {
 
   const student = await Student.findOne({
     studentId: studentId.toUpperCase().trim(),
-  }).select("+password");
+  }).select("+password").populate("assignedTeacher", "academyId");
 
   if (!student || !(await student.matchPassword(password))) {
     res.status(401);
@@ -69,6 +145,20 @@ const loginStudent = asyncHandler(async (req, res) => {
     throw new Error("This account has been deactivated. Contact your teacher.");
   }
 
+  const studentAcademyId = student.assignedTeacher?.academyId?.toString() || null;
+
+  if (academyId && studentAcademyId !== academyId) {
+    res.status(403);
+    throw new Error("This account does not belong to the selected academy.");
+  }
+
+  try {
+    await assertAcademyActive(studentAcademyId);
+  } catch (err) {
+    res.status(err.status || 403);
+    throw err;
+  }
+
   res.json({
     success: true,
     data: {
@@ -76,6 +166,7 @@ const loginStudent = asyncHandler(async (req, res) => {
       studentId: student.studentId,
       name: student.name,
       class: student.class,
+      academyId: studentAcademyId,
       profilePhoto: student.profilePhoto,
       token: generateToken(student._id, "student"),
     },
@@ -89,9 +180,9 @@ const getMe = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     userType: req.userType, // "staff" | "student"
-    role: req.userType === "staff" ? req.user.role : "student", // "admin" | "teacher" | "student"
+    role: req.userType === "staff" ? req.user.role : "student",
     data: req.user,
   });
 });
 
-module.exports = { loginTeacher, loginStudent, getMe };
+module.exports = { loginTeacher, loginSuperAdmin, loginStudent, getMe };

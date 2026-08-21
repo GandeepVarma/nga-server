@@ -27,8 +27,23 @@ const teacherSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["teacher", "admin"],
+      // "admin" here means Academy Admin (per-academy). "super_admin" sits
+      // above every academy and is not tied to one. Kept as "admin" rather
+      // than renaming to ACADEMY_ADMIN to avoid a breaking rename of an
+      // already-deployed field — see README for the mapping.
+      enum: ["teacher", "admin", "super_admin"],
       default: "teacher",
+    },
+    // Which Academy this staff member belongs to. Null for super_admin
+    // (they aren't scoped to one academy) and null for any account created
+    // before this field existed — those keep working exactly as before,
+    // since Phase 1 deliberately does not enforce per-query tenant
+    // isolation yet (that's Phase 2). Set automatically when an Academy
+    // Admin is created via Super Admin > Create Academy.
+    academyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Academy",
+      default: null,
     },
     phone: {
       type: String,

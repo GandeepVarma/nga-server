@@ -15,6 +15,8 @@ const dashboardRoutes = require("./routes/dashboardRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const onlineTestRoutes = require("./routes/onlineTestRoutes");
 const whatsappRoutes = require("./routes/whatsappRoutes");
+const superAdminRoutes = require("./routes/superAdminRoutes");
+const publicRoutes = require("./routes/publicRoutes");
 const { startScheduledJobs } = require("./jobs/notificationScheduler");
 
 connectDB();
@@ -45,6 +47,8 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/online-tests", onlineTestRoutes);
 app.use("/api/whatsapp", whatsappRoutes);
+app.use("/api/super-admin", superAdminRoutes);
+app.use("/api/public", publicRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
