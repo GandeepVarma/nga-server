@@ -57,7 +57,7 @@ const sendTestMessage = asyncHandler(async (req, res) => {
   const log = await whatsapp.sendTextMessage({
     to,
     name: "Test Recipient",
-    message: "This is a test message from NextGen Learning Academy's WhatsApp integration. If you received this, your setup is working correctly.",
+    message: "This is a test message from DHARA's WhatsApp integration. If you received this, your setup is working correctly.",
     sentBy: req.user._id,
   });
 

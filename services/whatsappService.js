@@ -123,7 +123,7 @@ const sendFeeReminder = ({ fee, student, offsetLabel }) => {
   const to = student.parentWhatsapp || student.phone;
   const message =
     `Hello ${student.parentName},\n\n` +
-    `This is a reminder from *NextGen Learning Academy*.\n\n` +
+    `This is a reminder from *DHARA*.\n\n` +
     `Student: ${student.name}\n` +
     `Class: ${student.class}\n` +
     `Pending Fee: ₹${fee.pending}\n` +

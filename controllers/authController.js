@@ -23,6 +23,12 @@ const assertAcademyActive = async (academyId) => {
   }
 };
 
+const getAcademyName = async (academyId) => {
+  if (!academyId) return null;
+  const academy = await Academy.findById(academyId).select("academyName");
+  return academy?.academyName || null;
+};
+
 // @desc    Staff login (Academy Admin or Teacher — NOT Super Admin, see
 //          loginSuperAdmin below for that separate flow). Accepts an
 //          optional `academyId` — when provided (i.e. login came from the
@@ -77,6 +83,7 @@ const loginTeacher = asyncHandler(async (req, res) => {
       email: teacher.email,
       role: teacher.role, // "teacher" | "admin"
       academyId: teacher.academyId,
+      academyName: await getAcademyName(teacher.academyId),
       profilePhoto: teacher.profilePhoto,
       token: generateToken(teacher._id, "teacher"),
     },
@@ -167,6 +174,7 @@ const loginStudent = asyncHandler(async (req, res) => {
       name: student.name,
       class: student.class,
       academyId: studentAcademyId,
+      academyName: await getAcademyName(studentAcademyId),
       profilePhoto: student.profilePhoto,
       token: generateToken(student._id, "student"),
     },
@@ -177,11 +185,18 @@ const loginStudent = asyncHandler(async (req, res) => {
 // @route   GET /api/auth/me
 // @access  Private
 const getMe = asyncHandler(async (req, res) => {
+  const data = req.user.toObject();
+  if (req.userType === "staff") data.academyName = await getAcademyName(req.user.academyId);
+  if (req.userType === "student") {
+    const student = await Student.findById(req.user._id).populate("assignedTeacher", "academyId");
+    const studentAcademyId = student?.assignedTeacher?.academyId || null;
+    data.academyName = await getAcademyName(studentAcademyId);
+  }
   res.json({
     success: true,
     userType: req.userType, // "staff" | "student"
     role: req.userType === "staff" ? req.user.role : "student",
-    data: req.user,
+    data,
   });
 });
 

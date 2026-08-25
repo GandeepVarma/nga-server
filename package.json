@@ -1,7 +1,7 @@
 {
   "name": "nextgen-learning-academy-server",
   "version": "1.0.0",
-  "description": "Backend API for NextGen Learning Academy",
+  "description": "Backend API for DHARA education management platform",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
