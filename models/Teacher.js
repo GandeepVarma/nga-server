@@ -25,6 +25,10 @@ const teacherSchema = new mongoose.Schema(
       minlength: 6,
       select: false,
     },
+    passwordChangedAt: {
+      type: Date,
+      select: false,
+    },
     role: {
       type: String,
       // "admin" here means Academy Admin (per-academy). "super_admin" sits

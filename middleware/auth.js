@@ -24,16 +24,21 @@ const protect = asyncHandler(async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     if (decoded.role === "student") {
-      req.user = await Student.findById(decoded.id).select("-password");
+      req.user = await Student.findById(decoded.id).select("-password +passwordChangedAt");
       req.userType = "student";
     } else {
-      req.user = await Teacher.findById(decoded.id).select("-password");
+      req.user = await Teacher.findById(decoded.id).select("-password +passwordChangedAt");
       req.userType = "staff";
     }
 
     if (!req.user) {
       res.status(401);
       throw new Error("Not authorized, user no longer exists");
+    }
+
+    if (req.user.passwordChangedAt && decoded.iat * 1000 < req.user.passwordChangedAt.getTime()) {
+      res.status(401);
+      throw new Error("Not authorized, token invalid or expired");
     }
 
     if (req.userType === "staff" && req.user.isActive === false) {

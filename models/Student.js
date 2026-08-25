@@ -67,6 +67,10 @@ const studentSchema = new mongoose.Schema(
       minlength: 6,
       select: false,
     },
+    passwordChangedAt: {
+      type: Date,
+      select: false,
+    },
     monthlyFee: {
       type: Number,
       required: true,

@@ -29,6 +29,39 @@ const getAcademyName = async (academyId) => {
   return academy?.academyName || null;
 };
 
+const changePassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    res.status(400);
+    throw new Error("Current password and new password are required");
+  }
+
+  if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(newPassword)) {
+    res.status(400);
+    throw new Error("New password must be at least 8 characters and include uppercase, lowercase, and a number");
+  }
+
+  const UserModel = req.userType === "student" ? Student : Teacher;
+  const user = await UserModel.findById(req.user._id).select("+password");
+
+  if (!user || !(await user.matchPassword(currentPassword))) {
+    res.status(401);
+    throw new Error("Current password is incorrect");
+  }
+
+  if (await user.matchPassword(newPassword)) {
+    res.status(400);
+    throw new Error("New password must be different from the current password");
+  }
+
+  user.password = newPassword;
+  user.passwordChangedAt = new Date();
+  await user.save();
+
+  res.json({ success: true, message: "Password changed successfully" });
+});
+
 // @desc    Staff login (Academy Admin or Teacher — NOT Super Admin, see
 //          loginSuperAdmin below for that separate flow). Accepts an
 //          optional `academyId` — when provided (i.e. login came from the
@@ -200,4 +233,4 @@ const getMe = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { loginTeacher, loginSuperAdmin, loginStudent, getMe };
+module.exports = { loginTeacher, loginSuperAdmin, loginStudent, getMe, changePassword };
