@@ -11,6 +11,7 @@ const answerSchema = new mongoose.Schema(
 
 const submissionSchema = new mongoose.Schema(
   {
+    academyId: { type: mongoose.Schema.Types.ObjectId, ref: "Academy", required: true, index: true },
     test: { type: mongoose.Schema.Types.ObjectId, ref: "OnlineTest", required: true },
     student: { type: mongoose.Schema.Types.ObjectId, ref: "Student", required: true },
     answers: [answerSchema],
@@ -30,5 +31,6 @@ const submissionSchema = new mongoose.Schema(
 
 // A student can only have ONE submission per test — enforces "start only once"
 submissionSchema.index({ test: 1, student: 1 }, { unique: true });
+submissionSchema.index({ academyId: 1, test: 1, student: 1 });
 
 module.exports = mongoose.model("Submission", submissionSchema);

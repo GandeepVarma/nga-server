@@ -3,6 +3,16 @@ const Academy = require("../models/Academy");
 const Teacher = require("../models/Teacher");
 const Student = require("../models/Student");
 const Plan = require("../models/Plan");
+const Attendance = require("../models/Attendance");
+const Fee = require("../models/Fee");
+const Test = require("../models/Test");
+const Assignment = require("../models/Assignment");
+const OnlineTest = require("../models/OnlineTest");
+const Submission = require("../models/Submission");
+const QuestionBank = require("../models/QuestionBank");
+const Notification = require("../models/Notification");
+const NotificationLog = require("../models/NotificationLog");
+const Settings = require("../models/Settings");
 
 // Generates a sequential, human-readable academy ID like "ACADEMY_001".
 // Simple counting approach — fine for Phase 1's scale; the schema's unique
@@ -212,6 +222,37 @@ const setAcademyStatus = asyncHandler(async (req, res) => {
   res.json({ success: true, message: `Academy status set to ${status}`, data: academy });
 });
 
+const deleteAcademy = asyncHandler(async (req, res) => {
+  const session = await Academy.startSession();
+  const academyId = req.params.id;
+  const deleted = {};
+  try {
+    await session.withTransaction(async () => {
+      const academy = await Academy.findById(academyId).session(session);
+      if (!academy) {
+        const error = new Error("Academy not found");
+        error.status = 404;
+        throw error;
+      }
+      const scopedDeletes = [
+        ["submissions", Submission], ["notifications", Notification], ["notificationLogs", NotificationLog],
+        ["attendance", Attendance], ["fees", Fee], ["assignments", Assignment], ["tests", Test],
+        ["onlineTests", OnlineTest], ["questionBank", QuestionBank], ["students", Student],
+        ["teachers", Teacher], ["settings", Settings],
+      ];
+      for (const [name, Model] of scopedDeletes) {
+        const result = await Model.deleteMany({ academyId }).session(session);
+        deleted[name] = result.deletedCount;
+      }
+      await Academy.deleteOne({ _id: academyId }).session(session);
+      deleted.academies = 1;
+    });
+  } finally {
+    await session.endSession();
+  }
+  res.json({ success: true, message: "Academy and all tenant data deleted", data: { academyId, deleted } });
+});
+
 // ---------- Plan management ----------
 
 // @desc    List all plans (including inactive ones — the public endpoint
@@ -255,5 +296,5 @@ const updatePlan = asyncHandler(async (req, res) => {
 
 module.exports = {
   getDashboard, createAcademy, getAcademies, getAcademyById, updateAcademy, setAcademyStatus,
-  getPlans, createPlan, updatePlan,
+  getPlans, createPlan, updatePlan, deleteAcademy,
 };

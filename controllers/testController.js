@@ -4,11 +4,12 @@ const Student = require("../models/Student");
 const { notifyStudents } = require("../utils/notify");
 const whatsapp = require("../services/whatsappService");
 const Settings = require("../models/Settings");
+const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
 // Returns the set of student _ids (as strings) a staff member is allowed to
 // touch: all active students for Admin, or only their own for a Teacher.
 const allowedStudentIds = async (req) => {
-  const filter = req.user.role === "admin" ? {} : { assignedTeacher: req.user._id };
+  const filter = req.user.role === "admin" ? { academyId: requireAcademyId(req) } : { academyId: requireAcademyId(req), assignedTeacher: req.user._id };
   const students = await Student.find(filter).select("_id");
   return students.map((s) => s._id.toString());
 };
@@ -40,8 +41,8 @@ const createTest = asyncHandler(async (req, res) => {
   } else {
     const filter =
       req.user.role === "admin"
-        ? { class: className, status: "Active" }
-        : { class: className, status: "Active", assignedTeacher: req.user._id };
+        ? { academyId: requireAcademyId(req), class: className, status: "Active" }
+        : { academyId: requireAcademyId(req), class: className, status: "Active", assignedTeacher: req.user._id };
     const classStudents = await Student.find(filter).select("_id");
     students = classStudents.map((s) => s._id);
   }
@@ -54,6 +55,7 @@ const createTest = asyncHandler(async (req, res) => {
     date,
     marks: students.map((studentId) => ({ student: studentId, marksObtained: null })),
     createdBy: req.user._id,
+    academyId: requireAcademyId(req),
   });
 
   await notifyStudents(
@@ -74,7 +76,7 @@ const createTest = asyncHandler(async (req, res) => {
 // @route   GET /api/tests?class=
 // @access  Staff (Admin or Teacher)
 const getTests = asyncHandler(async (req, res) => {
-  const query = {};
+  const query = { academyId: requireAcademyId(req) };
   if (req.query.class) query.class = req.query.class;
 
   const tests = await Test.find(query)
@@ -103,7 +105,7 @@ const getTests = asyncHandler(async (req, res) => {
 // @route   GET /api/tests/:id
 // @access  Staff (Admin or Teacher)
 const getTestById = asyncHandler(async (req, res) => {
-  const test = await Test.findById(req.params.id).populate("marks.student", "name studentId class");
+  const test = await Test.findOne(academyFilter(req, { _id: req.params.id })).populate("marks.student", "name studentId class");
   if (!test) {
     res.status(404);
     throw new Error("Test not found");
@@ -128,7 +130,7 @@ const getTestById = asyncHandler(async (req, res) => {
 // @route   PUT /api/tests/:id/marks
 // @access  Staff (Admin or Teacher)
 const updateMarks = asyncHandler(async (req, res) => {
-  const test = await Test.findById(req.params.id);
+  const test = await Test.findOne(academyFilter(req, { _id: req.params.id }));
   if (!test) {
     res.status(404);
     throw new Error("Test not found");
@@ -166,12 +168,12 @@ const updateMarks = asyncHandler(async (req, res) => {
 
   // Fire WhatsApp result notifications in the background — only for marks
   // that were actually entered (not cleared to null) in this call.
-  Settings.getSingleton()
+  Settings.getSingleton(requireAcademyId(req))
     .then(async (settings) => {
       if (!settings.whatsapp.notificationsEnabled.resultNotification) return;
       const graded = marks.filter((m) => m.marksObtained !== "" && m.marksObtained !== null);
       if (graded.length === 0) return;
-      const studentDocs = await Student.find({ _id: { $in: graded.map((m) => m.studentId) } });
+      const studentDocs = await Student.find({ academyId: requireAcademyId(req), _id: { $in: graded.map((m) => m.studentId) } });
       await Promise.all(
         graded.map((m) => {
           const student = studentDocs.find((s) => s._id.toString() === m.studentId.toString());
@@ -198,7 +200,7 @@ const deleteMark = asyncHandler(async (req, res) => {
     throw new Error("Access denied: this student is not assigned to you");
   }
 
-  const test = await Test.findById(req.params.id);
+  const test = await Test.findOne(academyFilter(req, { _id: req.params.id }));
   if (!test) {
     res.status(404);
     throw new Error("Test not found");
@@ -219,7 +221,7 @@ const deleteMark = asyncHandler(async (req, res) => {
 // @route   DELETE /api/tests/:id
 // @access  Staff (Admin or Teacher — creator only)
 const deleteTest = asyncHandler(async (req, res) => {
-  const test = await Test.findById(req.params.id);
+  const test = await Test.findOne(academyFilter(req, { _id: req.params.id }));
   if (!test) {
     res.status(404);
     throw new Error("Test not found");
@@ -246,8 +248,8 @@ const compareTests = asyncHandler(async (req, res) => {
   }
 
   const [a, b] = await Promise.all([
-    Test.findById(testA).populate("marks.student", "name studentId"),
-    Test.findById(testB).populate("marks.student", "name studentId"),
+    Test.findOne(academyFilter(req, { _id: testA })).populate("marks.student", "name studentId"),
+    Test.findOne(academyFilter(req, { _id: testB })).populate("marks.student", "name studentId"),
   ]);
 
   if (!a || !b) {
@@ -282,7 +284,7 @@ const compareTests = asyncHandler(async (req, res) => {
 // @route   GET /api/tests/my
 // @access  Student
 const getMyTests = asyncHandler(async (req, res) => {
-  const tests = await Test.find({ "marks.student": req.user._id }).sort({ date: -1 });
+  const tests = await Test.find(academyFilter(req, { "marks.student": req.user._id })).sort({ date: -1 });
 
   const data = tests.map((t) => {
     const entry = t.marks.find((m) => m.student.toString() === req.user._id.toString());

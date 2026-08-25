@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 
 const studentSchema = new mongoose.Schema(
   {
+    academyId: { type: mongoose.Schema.Types.ObjectId, ref: "Academy", required: true, index: true },
     studentId: {
       type: String,
       required: [true, "Student ID is required"],
@@ -94,6 +95,7 @@ const studentSchema = new mongoose.Schema(
 );
 
 studentSchema.index({ name: "text", studentId: "text", phone: "text" });
+studentSchema.index({ academyId: 1, assignedTeacher: 1 });
 
 studentSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();

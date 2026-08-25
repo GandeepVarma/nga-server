@@ -25,6 +25,7 @@ const questionSchema = new mongoose.Schema(
 
 const onlineTestSchema = new mongoose.Schema(
   {
+    academyId: { type: mongoose.Schema.Types.ObjectId, ref: "Academy", required: true, index: true },
     title: { type: String, required: true, trim: true },
     subject: { type: String, required: true, trim: true },
     // One test can be assigned to several classes/batches at once

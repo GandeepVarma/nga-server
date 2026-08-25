@@ -4,9 +4,10 @@ const Student = require("../models/Student");
 const { notifyStudents } = require("../utils/notify");
 const whatsapp = require("../services/whatsappService");
 const Settings = require("../models/Settings");
+const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
 const allowedStudentIds = async (req) => {
-  const filter = req.user.role === "admin" ? {} : { assignedTeacher: req.user._id };
+  const filter = req.user.role === "admin" ? { academyId: requireAcademyId(req) } : { academyId: requireAcademyId(req), assignedTeacher: req.user._id };
   const students = await Student.find(filter).select("_id");
   return students.map((s) => s._id.toString());
 };
@@ -37,8 +38,8 @@ const createAssignment = asyncHandler(async (req, res) => {
   } else {
     const filter =
       req.user.role === "admin"
-        ? { class: className, status: "Active" }
-        : { class: className, status: "Active", assignedTeacher: req.user._id };
+        ? { academyId: requireAcademyId(req), class: className, status: "Active" }
+        : { academyId: requireAcademyId(req), class: className, status: "Active", assignedTeacher: req.user._id };
     const classStudents = await Student.find(filter).select("_id");
     students = classStudents.map((s) => s._id);
   }
@@ -58,6 +59,7 @@ const createAssignment = asyncHandler(async (req, res) => {
     files,
     assignedStudents: students.map((studentId) => ({ student: studentId })),
     createdBy: req.user._id,
+    academyId: requireAcademyId(req),
   });
 
   await notifyStudents(
@@ -71,10 +73,10 @@ const createAssignment = asyncHandler(async (req, res) => {
   // Fire immediate WhatsApp homework alerts in the background (a separate
   // 1-day-before reminder is also sent by the scheduled job for anyone
   // still Pending — dedupeKey prevents that from double-sending this one).
-  Settings.getSingleton()
+  Settings.getSingleton(requireAcademyId(req))
     .then(async (settings) => {
       if (!settings.whatsapp.notificationsEnabled.homeworkReminder) return;
-      const studentDocs = await Student.find({ _id: { $in: students } });
+      const studentDocs = await Student.find({ academyId: requireAcademyId(req), _id: { $in: students } });
       await Promise.all(studentDocs.map((s) => whatsapp.sendHomeworkReminder({ student: s, assignment })));
     })
     .catch((err) => console.error("[whatsapp] homework reminder failed:", err.message));
@@ -87,7 +89,7 @@ const createAssignment = asyncHandler(async (req, res) => {
 // @route   GET /api/assignments?class=
 // @access  Staff (Admin or Teacher)
 const getAssignments = asyncHandler(async (req, res) => {
-  const query = {};
+  const query = { academyId: requireAcademyId(req) };
   if (req.query.class) query.class = req.query.class;
 
   const assignments = await Assignment.find(query)
@@ -116,7 +118,7 @@ const getAssignments = asyncHandler(async (req, res) => {
 // @route   GET /api/assignments/:id
 // @access  Staff (Admin or Teacher) or assigned student
 const getAssignmentById = asyncHandler(async (req, res) => {
-  const assignment = await Assignment.findById(req.params.id).populate(
+  const assignment = await Assignment.findOne(academyFilter(req, { _id: req.params.id })).populate(
     "assignedStudents.student",
     "name studentId"
   );
@@ -152,7 +154,7 @@ const updateSubmissionStatus = asyncHandler(async (req, res) => {
     }
   }
 
-  const assignment = await Assignment.findById(req.params.id);
+  const assignment = await Assignment.findOne(academyFilter(req, { _id: req.params.id }));
   if (!assignment) {
     res.status(404);
     throw new Error("Assignment not found");
@@ -178,7 +180,7 @@ const updateSubmissionStatus = asyncHandler(async (req, res) => {
 // @route   DELETE /api/assignments/:id
 // @access  Staff (Admin or Teacher — creator only)
 const deleteAssignment = asyncHandler(async (req, res) => {
-  const assignment = await Assignment.findById(req.params.id);
+  const assignment = await Assignment.findOne(academyFilter(req, { _id: req.params.id }));
   if (!assignment) {
     res.status(404);
     throw new Error("Assignment not found");
@@ -197,7 +199,7 @@ const deleteAssignment = asyncHandler(async (req, res) => {
 // @route   GET /api/assignments/my
 // @access  Student
 const getMyAssignments = asyncHandler(async (req, res) => {
-  const assignments = await Assignment.find({ "assignedStudents.student": req.user._id }).sort({
+  const assignments = await Assignment.find(academyFilter(req, { "assignedStudents.student": req.user._id })).sort({
     submissionDate: -1,
   });
 

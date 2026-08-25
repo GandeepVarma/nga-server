@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const feeSchema = new mongoose.Schema(
   {
+    academyId: { type: mongoose.Schema.Types.ObjectId, ref: "Academy", required: true, index: true },
     student: { type: mongoose.Schema.Types.ObjectId, ref: "Student", required: true },
     month: { type: String, required: true },
     dueDate: { type: Date, default: null }, // optional — powers WhatsApp fee reminder scheduling
@@ -22,6 +23,7 @@ const feeSchema = new mongoose.Schema(
 );
 
 feeSchema.index({ student: 1, month: 1 }, { unique: true });
+feeSchema.index({ academyId: 1, student: 1, month: 1 });
 
 feeSchema.pre("save", function (next) {
   const totalDue = this.amount + this.carryForward;

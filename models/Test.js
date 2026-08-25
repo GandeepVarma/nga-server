@@ -20,6 +20,7 @@ const markEntrySchema = new mongoose.Schema(
 
 const testSchema = new mongoose.Schema(
   {
+    academyId: { type: mongoose.Schema.Types.ObjectId, ref: "Academy", required: true, index: true },
     testName: {
       type: String,
       required: [true, "Test name is required"],

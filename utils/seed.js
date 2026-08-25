@@ -6,9 +6,12 @@ const mongoose = require("mongoose");
 const connectDB = require("../config/db");
 const Teacher = require("../models/Teacher");
 const Student = require("../models/Student");
+const Academy = require("../models/Academy");
 
 const run = async () => {
   await connectDB();
+  const academy = await Academy.findOne({ isFounderAcademy: true }) || await Academy.findOne({ status: "ACTIVE" });
+  if (!academy) throw new Error("Create an active academy before running the seed script");
 
   // 1. Main Admin
   const adminEmail = "gandeep@nextgenacademy.com";
@@ -19,6 +22,7 @@ const run = async () => {
       email: adminEmail,
       password: "ChangeMe123!",
       role: "admin",
+      academyId: academy._id,
     });
     console.log(`Main Admin created -> ${adminEmail} / ChangeMe123!`);
   } else {
@@ -34,6 +38,7 @@ const run = async () => {
       email: teacherEmail,
       password: "Teacher123!",
       role: "teacher",
+      academyId: academy._id,
     });
     console.log(`Sample teacher created -> ${teacherEmail} / Teacher123!`);
   } else {
@@ -53,6 +58,7 @@ const run = async () => {
       monthlyFee: 2000,
       admissionFee: 5000,
       assignedTeacher: teacher._id,
+      academyId: academy._id,
     },
     {
       studentId: "NGA002",
@@ -65,6 +71,7 @@ const run = async () => {
       monthlyFee: 2000,
       admissionFee: 5000,
       assignedTeacher: teacher._id,
+      academyId: academy._id,
     },
   ];
 

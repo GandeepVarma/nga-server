@@ -118,7 +118,7 @@ const loginTeacher = asyncHandler(async (req, res) => {
       academyId: teacher.academyId,
       academyName: await getAcademyName(teacher.academyId),
       profilePhoto: teacher.profilePhoto,
-      token: generateToken(teacher._id, "teacher"),
+      token: generateToken(teacher._id, "teacher", teacher.academyId),
     },
   });
 });
@@ -209,7 +209,7 @@ const loginStudent = asyncHandler(async (req, res) => {
       academyId: studentAcademyId,
       academyName: await getAcademyName(studentAcademyId),
       profilePhoto: student.profilePhoto,
-      token: generateToken(student._id, "student"),
+      token: generateToken(student._id, "student", studentAcademyId),
     },
   });
 });

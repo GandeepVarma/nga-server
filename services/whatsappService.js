@@ -1,6 +1,8 @@
 const axios = require("axios");
 const Settings = require("../models/Settings");
 const NotificationLog = require("../models/NotificationLog");
+const Student = require("../models/Student");
+const Teacher = require("../models/Teacher");
 
 // ---------------------------------------------------------------------------
 // Low-level Meta WhatsApp Cloud API caller.
@@ -37,8 +39,12 @@ const normalizePhone = (raw) => {
 // key already exists — this is what prevents duplicate fee/homework/test
 // reminders if a scheduled job or a page action runs more than once.
 const dispatch = async ({ to, name, message, type, studentId = null, sentBy = null, dedupeKey = null }) => {
+  const student = studentId ? await Student.findById(studentId).select("academyId") : null;
+  const sender = sentBy ? await Teacher.findById(sentBy).select("academyId") : null;
+  const academyId = student?.academyId || sender?.academyId;
+  if (!academyId) throw new Error("Cannot send a tenant notification without academy context");
   if (dedupeKey) {
-    const existing = await NotificationLog.findOne({ dedupeKey });
+    const existing = await NotificationLog.findOne({ academyId, dedupeKey });
     if (existing) return existing;
   }
 
@@ -46,6 +52,7 @@ const dispatch = async ({ to, name, message, type, studentId = null, sentBy = nu
   if (!normalized) {
     return NotificationLog.create({
       recipientNumber: to || "(missing)",
+      academyId,
       recipientName: name,
       student: studentId,
       type,
@@ -57,12 +64,13 @@ const dispatch = async ({ to, name, message, type, studentId = null, sentBy = nu
     });
   }
 
-  const settings = await Settings.getSingleton();
+  const settings = await Settings.getSingleton(academyId);
   const { phoneNumberId, accessToken } = settings.whatsapp;
 
   if (!phoneNumberId || !accessToken) {
     return NotificationLog.create({
       recipientNumber: normalized,
+      academyId,
       recipientName: name,
       student: studentId,
       type,
@@ -78,6 +86,7 @@ const dispatch = async ({ to, name, message, type, studentId = null, sentBy = nu
     const providerMessageId = await sendViaMetaCloudAPI({ phoneNumberId, accessToken, to: normalized, body: message });
     return NotificationLog.create({
       recipientNumber: normalized,
+      academyId,
       recipientName: name,
       student: studentId,
       type,
@@ -92,6 +101,7 @@ const dispatch = async ({ to, name, message, type, studentId = null, sentBy = nu
     const errorMessage = err.response?.data?.error?.message || err.message || "Unknown error sending WhatsApp message";
     return NotificationLog.create({
       recipientNumber: normalized,
+      academyId,
       recipientName: name,
       student: studentId,
       type,

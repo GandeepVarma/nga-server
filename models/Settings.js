@@ -13,6 +13,7 @@ const mongoose = require("mongoose");
 // that's flagged in the README as a follow-up rather than implemented here.
 const settingsSchema = new mongoose.Schema(
   {
+    academyId: { type: mongoose.Schema.Types.ObjectId, ref: "Academy", required: true, unique: true, index: true },
     whatsapp: {
       phoneNumberId: { type: String, default: "" },
       accessToken: { type: String, default: "", select: false },
@@ -35,9 +36,10 @@ const settingsSchema = new mongoose.Schema(
 );
 
 // Always returns the single settings document, creating it on first use.
-settingsSchema.statics.getSingleton = async function () {
-  let doc = await this.findOne().select("+whatsapp.accessToken +whatsapp.webhookVerifyToken");
-  if (!doc) doc = await this.create({});
+settingsSchema.statics.getSingleton = async function (academyId) {
+  if (!academyId) throw new Error("academyId is required for settings");
+  let doc = await this.findOne({ academyId }).select("+whatsapp.accessToken +whatsapp.webhookVerifyToken");
+  if (!doc) doc = await this.create({ academyId });
   return doc;
 };
 

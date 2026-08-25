@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const notificationLogSchema = new mongoose.Schema(
   {
+    academyId: { type: mongoose.Schema.Types.ObjectId, ref: "Academy", required: true, index: true },
     recipientNumber: { type: String, required: true },
     recipientName: { type: String, default: "" },
     student: { type: mongoose.Schema.Types.ObjectId, ref: "Student", default: null },

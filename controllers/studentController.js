@@ -1,17 +1,20 @@
 const asyncHandler = require("express-async-handler");
 const Student = require("../models/Student");
+const Teacher = require("../models/Teacher");
 const Test = require("../models/Test");
 const Assignment = require("../models/Assignment");
 const Attendance = require("../models/Attendance");
 const Fee = require("../models/Fee");
+const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
 // Small helper: builds the base filter every student query must start from.
 // Admin -> no restriction. Teacher -> only their own assigned students.
 // This is the single source of truth for the access rule, used everywhere
 // below so no endpoint can accidentally leak another teacher's students.
 const scopeToRole = (req, extra = {}) => {
-  if (req.user.role === "admin") return extra;
-  return { ...extra, assignedTeacher: req.user._id };
+  const tenant = { academyId: requireAcademyId(req) };
+  if (req.user.role === "admin") return { ...tenant, ...extra };
+  return { ...tenant, ...extra, assignedTeacher: req.user._id };
 };
 
 // @desc    Create a new student
@@ -51,7 +54,13 @@ const createStudent = asyncHandler(async (req, res) => {
     finalAssignedTeacher = req.user._id;
   }
 
-  const exists = await Student.findOne({ studentId: studentId.toUpperCase() });
+  const academyId = requireAcademyId(req);
+  const teacher = await Teacher.findOne({ _id: finalAssignedTeacher, academyId, role: { $in: ["admin", "teacher"] } });
+  if (!teacher) {
+    res.status(400);
+    throw new Error("Assigned teacher does not belong to this academy");
+  }
+  const exists = await Student.findOne({ academyId, studentId: studentId.toUpperCase() });
   if (exists) {
     res.status(400);
     throw new Error("A student with this Student ID already exists");
@@ -69,6 +78,7 @@ const createStudent = asyncHandler(async (req, res) => {
     monthlyFee,
     admissionFee,
     assignedTeacher: finalAssignedTeacher,
+    academyId,
   });
 
   res.status(201).json({
@@ -182,7 +192,7 @@ const getStudentFullProfile = asyncHandler(async (req, res) => {
       res.status(403);
       throw new Error("Access denied");
     }
-    student = await Student.findById(req.params.id);
+    student = await Student.findOne({ _id: req.params.id, academyId: requireAcademyId(req) });
   } else {
     student = await Student.findOne(scopeToRole(req, { _id: req.params.id }));
   }
@@ -193,12 +203,12 @@ const getStudentFullProfile = asyncHandler(async (req, res) => {
   }
 
   const [tests, assignments, attendanceRecords, fees] = await Promise.all([
-    Test.find({ "marks.student": student._id }).sort({ date: -1 }),
-    Assignment.find({ "assignedStudents.student": student._id }).sort({ submissionDate: -1 }),
-    Attendance.find({ student: student._id }).sort({ date: -1 }),
+    Test.find({ academyId: student.academyId, "marks.student": student._id }).sort({ date: -1 }),
+    Assignment.find({ academyId: student.academyId, "assignedStudents.student": student._id }).sort({ submissionDate: -1 }),
+    Attendance.find({ academyId: student.academyId, student: student._id }).sort({ date: -1 }),
     // Fee records are only fetched (and returned) for Admin or the student themself
     req.userType === "student" || req.user.role === "admin"
-      ? Fee.find({ student: student._id }).sort({ month: -1 })
+      ? Fee.find({ academyId: student.academyId, student: student._id }).sort({ month: -1 })
       : Promise.resolve(null),
   ]);
 

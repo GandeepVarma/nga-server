@@ -5,6 +5,7 @@ const Test = require("../models/Test");
 const Assignment = require("../models/Assignment");
 const Fee = require("../models/Fee");
 const Attendance = require("../models/Attendance");
+const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
 // ---------- Teacher management (Admin only) ----------
 
@@ -19,7 +20,8 @@ const createTeacher = asyncHandler(async (req, res) => {
     throw new Error("Name, email and password are required");
   }
 
-  const exists = await Teacher.findOne({ email });
+  const academyId = requireAcademyId(req);
+  const exists = await Teacher.findOne({ academyId, email });
   if (exists) {
     res.status(400);
     throw new Error("A staff account with this email already exists");
@@ -31,6 +33,7 @@ const createTeacher = asyncHandler(async (req, res) => {
     password,
     phone,
     role: "teacher",
+    academyId,
   });
 
   res.status(201).json({
@@ -43,11 +46,12 @@ const createTeacher = asyncHandler(async (req, res) => {
 // @route   GET /api/admin/teachers
 // @access  Admin
 const getTeachers = asyncHandler(async (req, res) => {
-  const teachers = await Teacher.find({ role: "teacher" }).sort({ createdAt: -1 });
+  const academyId = requireAcademyId(req);
+  const teachers = await Teacher.find({ academyId, role: "teacher" }).sort({ createdAt: -1 });
 
   const withCounts = await Promise.all(
     teachers.map(async (t) => {
-      const studentCount = await Student.countDocuments({ assignedTeacher: t._id });
+      const studentCount = await Student.countDocuments({ academyId, assignedTeacher: t._id });
       return { ...t.toObject(), studentCount };
     })
   );
@@ -59,7 +63,7 @@ const getTeachers = asyncHandler(async (req, res) => {
 // @route   PUT /api/admin/teachers/:id
 // @access  Admin
 const updateTeacher = asyncHandler(async (req, res) => {
-  const teacher = await Teacher.findOne({ _id: req.params.id, role: "teacher" });
+  const teacher = await Teacher.findOne(academyFilter(req, { _id: req.params.id, role: "teacher" }));
   if (!teacher) {
     res.status(404);
     throw new Error("Teacher not found");
@@ -78,7 +82,7 @@ const updateTeacher = asyncHandler(async (req, res) => {
 // @body    { isActive: boolean }
 // @access  Admin
 const setTeacherStatus = asyncHandler(async (req, res) => {
-  const teacher = await Teacher.findOne({ _id: req.params.id, role: "teacher" });
+  const teacher = await Teacher.findOne(academyFilter(req, { _id: req.params.id, role: "teacher" }));
   if (!teacher) {
     res.status(404);
     throw new Error("Teacher not found");
@@ -105,7 +109,7 @@ const resetTeacherPassword = asyncHandler(async (req, res) => {
     throw new Error("newPassword is required and must be at least 6 characters");
   }
 
-  const teacher = await Teacher.findOne({ _id: req.params.id, role: "teacher" });
+  const teacher = await Teacher.findOne(academyFilter(req, { _id: req.params.id, role: "teacher" }));
   if (!teacher) {
     res.status(404);
     throw new Error("Teacher not found");
@@ -134,15 +138,15 @@ const assignStudents = asyncHandler(async (req, res) => {
     throw new Error("studentIds[] and teacherId are required");
   }
 
-  const teacher = await Teacher.findOne({ _id: teacherId, role: "teacher" });
+  const teacher = await Teacher.findOne(academyFilter(req, { _id: teacherId, role: "teacher" }));
   if (!teacher) {
     res.status(404);
     throw new Error("Target teacher not found");
   }
 
   const result = await Student.updateMany(
-    { _id: { $in: studentIds } },
-    { $set: { assignedTeacher: teacherId } }
+    { academyId: requireAcademyId(req), _id: { $in: studentIds } },
+    { $set: { assignedTeacher: teacherId, academyId: requireAcademyId(req) } }
   );
 
   res.json({
@@ -157,13 +161,13 @@ const assignStudents = asyncHandler(async (req, res) => {
 // @access  Admin
 const reassignStudent = asyncHandler(async (req, res) => {
   const { teacherId } = req.body;
-  const teacher = await Teacher.findOne({ _id: teacherId, role: "teacher" });
+  const teacher = await Teacher.findOne(academyFilter(req, { _id: teacherId, role: "teacher" }));
   if (!teacher) {
     res.status(404);
     throw new Error("Target teacher not found");
   }
 
-  const student = await Student.findById(req.params.id);
+  const student = await Student.findOne(academyFilter(req, { _id: req.params.id }));
   if (!student) {
     res.status(404);
     throw new Error("Student not found");
@@ -182,22 +186,23 @@ const reassignStudent = asyncHandler(async (req, res) => {
 // @access  Admin
 const getAdminDashboard = asyncHandler(async (req, res) => {
   const [totalTeachers, totalStudents] = await Promise.all([
-    Teacher.countDocuments({ role: "teacher" }),
-    Student.countDocuments({ status: "Active" }),
+    Teacher.countDocuments({ academyId: requireAcademyId(req), role: "teacher" }),
+    Student.countDocuments({ academyId: requireAcademyId(req), status: "Active" }),
   ]);
 
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
   const endOfDay = new Date();
   endOfDay.setHours(23, 59, 59, 999);
-  const todaysAttendanceRecords = await Attendance.find({ date: { $gte: startOfDay, $lte: endOfDay } });
+  const academyId = requireAcademyId(req);
+  const todaysAttendanceRecords = await Attendance.find({ academyId, date: { $gte: startOfDay, $lte: endOfDay } });
   const todaysAttendance = {
     marked: todaysAttendanceRecords.length,
     present: todaysAttendanceRecords.filter((r) => r.status === "Present").length,
     totalStudents,
   };
 
-  const fees = await Fee.find();
+  const fees = await Fee.find({ academyId });
   const feesCollected = fees.reduce((sum, f) => sum + f.paid, 0);
   const pendingFees = fees.reduce((sum, f) => sum + f.pending, 0);
 
@@ -217,17 +222,17 @@ const getAdminDashboard = asyncHandler(async (req, res) => {
     .slice(-6)
     .map(([month, revenue]) => ({ month, revenue }));
 
-  const recentAdmissions = await Student.find()
+  const recentAdmissions = await Student.find({ academyId })
     .sort({ dateOfJoining: -1 })
     .limit(5)
     .select("name studentId class dateOfJoining");
 
   // Teacher performance: student count + average test score across their students
-  const teachers = await Teacher.find({ role: "teacher" });
+  const teachers = await Teacher.find({ academyId, role: "teacher" });
   const teacherPerformance = await Promise.all(
     teachers.map(async (t) => {
-      const studentIds = await Student.find({ assignedTeacher: t._id }).distinct("_id");
-      const tests = await Test.find({ "marks.student": { $in: studentIds } });
+      const studentIds = await Student.find({ academyId, assignedTeacher: t._id }).distinct("_id");
+      const tests = await Test.find({ academyId, "marks.student": { $in: studentIds } });
       let totalScore = 0;
       let count = 0;
       tests.forEach((test) => {

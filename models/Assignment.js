@@ -26,6 +26,7 @@ const submissionSchema = new mongoose.Schema(
 
 const assignmentSchema = new mongoose.Schema(
   {
+    academyId: { type: mongoose.Schema.Types.ObjectId, ref: "Academy", required: true, index: true },
     title: {
       type: String,
       required: [true, "Assignment title is required"],

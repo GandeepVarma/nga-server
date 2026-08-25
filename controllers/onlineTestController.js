@@ -4,13 +4,14 @@ const Submission = require("../models/Submission");
 const Student = require("../models/Student");
 const whatsapp = require("../services/whatsappService");
 const Settings = require("../models/Settings");
+const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
 // A teacher may only build tests for classes where they actually have
 // assigned students — prevents a teacher from silently reaching students
 // that aren't theirs by just typing a class name into the form.
 const assertClassesOwnedByTeacher = async (req, classes) => {
   if (req.user.role === "admin") return;
-  const ownedClasses = await Student.find({ assignedTeacher: req.user._id }).distinct("class");
+  const ownedClasses = await Student.find({ academyId: requireAcademyId(req), assignedTeacher: req.user._id }).distinct("class");
   const invalid = classes.filter((c) => !ownedClasses.includes(c));
   if (invalid.length > 0) {
     const err = new Error(`Access denied: you have no assigned students in: ${invalid.join(", ")}`);
@@ -21,7 +22,7 @@ const assertClassesOwnedByTeacher = async (req, classes) => {
 
 // Ownership check used by update/delete/publish/analytics/submissions/duplicate
 const findOwnedTest = async (req, id) => {
-  const test = await OnlineTest.findById(id);
+  const test = await OnlineTest.findOne(academyFilter(req, { _id: id }));
   if (!test) {
     const err = new Error("Test not found");
     err.status = 404;
@@ -70,6 +71,7 @@ const createTest = asyncHandler(async (req, res) => {
     passPercentage: passPercentage || 40,
     questions: questions || [],
     createdBy: req.user._id,
+    academyId: requireAcademyId(req),
   });
 
   res.status(201).json({ success: true, data: test });
@@ -80,7 +82,7 @@ const createTest = asyncHandler(async (req, res) => {
 // @access  Staff (Admin or Teacher)
 const getTests = asyncHandler(async (req, res) => {
   const { search, subject, published, page = 1, limit = 10 } = req.query;
-  const query = req.user.role === "admin" ? {} : { createdBy: req.user._id };
+  const query = req.user.role === "admin" ? { academyId: requireAcademyId(req) } : { academyId: requireAcademyId(req), createdBy: req.user._id };
 
   if (subject) query.subject = subject;
   if (published !== undefined) query.published = published === "true";
@@ -160,10 +162,10 @@ const setPublishStatus = asyncHandler(async (req, res) => {
   await test.save();
 
   if (test.published) {
-    Settings.getSingleton()
+    Settings.getSingleton(requireAcademyId(req))
       .then(async (settings) => {
         if (!settings.whatsapp.notificationsEnabled.testAnnouncement) return;
-        const students = await Student.find({ class: { $in: test.classes }, status: "Active" });
+        const students = await Student.find({ academyId: requireAcademyId(req), class: { $in: test.classes }, status: "Active" });
         await Promise.all(students.map((s) => whatsapp.sendTestAnnouncement({ student: s, test })));
       })
       .catch((err) => console.error("[whatsapp] test announcement failed:", err.message));
@@ -196,6 +198,7 @@ const duplicateTest = asyncHandler(async (req, res) => {
     passPercentage: test.passPercentage,
     questions: test.questions,
     createdBy: req.user._id,
+    academyId: requireAcademyId(req),
     published: false,
   });
 
@@ -211,7 +214,7 @@ const deleteTest = asyncHandler(async (req, res) => {
     throw err;
   });
 
-  await Submission.deleteMany({ test: test._id });
+  await Submission.deleteMany({ academyId: requireAcademyId(req), test: test._id });
   await test.deleteOne();
   res.json({ success: true, message: "Test and its submissions deleted" });
 });
@@ -226,8 +229,8 @@ const getAnalytics = asyncHandler(async (req, res) => {
   });
 
   const [assignedCount, submissions] = await Promise.all([
-    Student.countDocuments({ class: { $in: test.classes }, status: "Active" }),
-    Submission.find({ test: test._id, submittedAt: { $ne: null } }).populate("student", "name studentId"),
+    Student.countDocuments({ academyId: requireAcademyId(req), class: { $in: test.classes }, status: "Active" }),
+    Submission.find({ academyId: requireAcademyId(req), test: test._id, submittedAt: { $ne: null } }).populate("student", "name studentId"),
   ]);
 
   const attempted = submissions.length;
@@ -290,12 +293,12 @@ const getSubmissions = asyncHandler(async (req, res) => {
   const skip = (Number(page) - 1) * Number(limit);
 
   const [submissions, total] = await Promise.all([
-    Submission.find({ test: test._id })
+    Submission.find({ academyId: requireAcademyId(req), test: test._id })
       .populate("student", "name studentId class")
       .sort({ submittedAt: -1 })
       .skip(skip)
       .limit(Number(limit)),
-    Submission.countDocuments({ test: test._id }),
+    Submission.countDocuments({ academyId: requireAcademyId(req), test: test._id }),
   ]);
 
   res.json({ success: true, count: submissions.length, total, page: Number(page), data: submissions });
@@ -310,7 +313,7 @@ const exportSubmissionsCSV = asyncHandler(async (req, res) => {
     throw err;
   });
 
-  const submissions = await Submission.find({ test: test._id }).populate("student", "name studentId class");
+  const submissions = await Submission.find({ academyId: requireAcademyId(req), test: test._id }).populate("student", "name studentId class");
 
   const header = "Student ID,Name,Class,Score,Percentage,Correct,Wrong,Unanswered,Time Taken (s),Auto Submitted,Tab Switches,Status\n";
   const rows = submissions.map((s) => {

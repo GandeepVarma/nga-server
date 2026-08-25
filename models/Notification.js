@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const notificationSchema = new mongoose.Schema(
   {
+    academyId: { type: mongoose.Schema.Types.ObjectId, ref: "Academy", required: true, index: true },
     student: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Student",

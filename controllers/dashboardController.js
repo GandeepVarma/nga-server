@@ -3,6 +3,7 @@ const Student = require("../models/Student");
 const Test = require("../models/Test");
 const Assignment = require("../models/Assignment");
 const Attendance = require("../models/Attendance");
+const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
 // @desc    Teacher's own dashboard: only their assigned students' data.
 //          Deliberately contains NO fee/revenue information — per RBAC
@@ -11,7 +12,7 @@ const Attendance = require("../models/Attendance");
 // @access  Teacher (not Admin — Admin uses /api/admin/dashboard)
 const getTeacherDashboard = asyncHandler(async (req, res) => {
   const myStudentIds = await Student.find({
-    assignedTeacher: req.user._id,
+    academyId: requireAcademyId(req), assignedTeacher: req.user._id,
     status: "Active",
   }).distinct("_id");
 
@@ -23,7 +24,7 @@ const getTeacherDashboard = asyncHandler(async (req, res) => {
   endOfDay.setHours(23, 59, 59, 999);
 
   const todaysAttendanceRecords = await Attendance.find({
-    student: { $in: myStudentIds },
+    academyId: requireAcademyId(req), student: { $in: myStudentIds },
     date: { $gte: startOfDay, $lte: endOfDay },
   });
   const todaysAttendance = {
@@ -34,11 +35,11 @@ const getTeacherDashboard = asyncHandler(async (req, res) => {
 
   const now = new Date();
   const upcomingTests = await Test.countDocuments({
-    "marks.student": { $in: myStudentIds },
+    academyId: requireAcademyId(req), "marks.student": { $in: myStudentIds },
     date: { $gte: now },
   });
 
-  const assignments = await Assignment.find({ "assignedStudents.student": { $in: myStudentIds } });
+  const assignments = await Assignment.find({ academyId: requireAcademyId(req), "assignedStudents.student": { $in: myStudentIds } });
   let assignmentsPending = 0;
   assignments.forEach((a) => {
     assignmentsPending += a.assignedStudents.filter(
@@ -47,7 +48,7 @@ const getTeacherDashboard = asyncHandler(async (req, res) => {
   });
 
   // Recent test entries across my students
-  const recentTests = await Test.find({ "marks.student": { $in: myStudentIds } })
+  const recentTests = await Test.find({ academyId: requireAcademyId(req), "marks.student": { $in: myStudentIds } })
     .sort({ date: -1 })
     .limit(5)
     .select("testName subject date maxMarks");
@@ -72,11 +73,11 @@ const getStudentDashboard = asyncHandler(async (req, res) => {
 
   const Fee = require("../models/Fee");
   const [attendanceRecords, upcomingTests, assignments, fees, recentTests] = await Promise.all([
-    Attendance.find({ student: student._id }),
-    Test.find({ "marks.student": student._id, date: { $gte: new Date() } }).sort({ date: 1 }).limit(5),
-    Assignment.find({ "assignedStudents.student": student._id }).sort({ submissionDate: 1 }),
-    Fee.find({ student: student._id }).sort({ month: -1 }),
-    Test.find({ "marks.student": student._id, date: { $lt: new Date() } }).sort({ date: -1 }).limit(10),
+    Attendance.find(academyFilter(req, { student: student._id })),
+    Test.find(academyFilter(req, { "marks.student": student._id, date: { $gte: new Date() } })).sort({ date: 1 }).limit(5),
+    Assignment.find(academyFilter(req, { "assignedStudents.student": student._id })).sort({ submissionDate: 1 }),
+    Fee.find(academyFilter(req, { student: student._id })).sort({ month: -1 }),
+    Test.find(academyFilter(req, { "marks.student": student._id, date: { $lt: new Date() } })).sort({ date: -1 }).limit(10),
   ]);
 
   const totalDays = attendanceRecords.length;

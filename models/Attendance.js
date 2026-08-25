@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const attendanceSchema = new mongoose.Schema(
   {
+    academyId: { type: mongoose.Schema.Types.ObjectId, ref: "Academy", required: true, index: true },
     student: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Student",
@@ -30,5 +31,6 @@ const attendanceSchema = new mongoose.Schema(
 
 // One attendance record per student per day
 attendanceSchema.index({ student: 1, date: 1 }, { unique: true });
+attendanceSchema.index({ academyId: 1, student: 1, date: 1 });
 
 module.exports = mongoose.model("Attendance", attendanceSchema);

@@ -12,7 +12,8 @@
     "reset": "node utils/reset.js",
     "migrate-assign-teacher": "node utils/migrateAssignTeacher.js",
     "create-super-admin": "node utils/createSuperAdmin.js",
-    "migrate-phase1-saas": "node utils/migratePhase1Saas.js"
+    "migrate-phase1-saas": "node utils/migratePhase1Saas.js",
+    "migrate-tenant-isolation": "node utils/migrateTenantIsolation.js"
   },
   "dependencies": {
     "axios": "^1.7.2",

@@ -1,8 +1,11 @@
 const Notification = require("../models/Notification");
+const Student = require("../models/Student");
 
 // Creates a notification for a single student.
 const notifyStudent = async (studentId, type, title, message, relatedId = null) => {
+  const student = await Student.findById(studentId).select("academyId");
   return Notification.create({
+    academyId: student.academyId,
     student: studentId,
     type,
     title,
@@ -20,7 +23,12 @@ const notifyStudents = async (studentIds, type, title, message, relatedId = null
     message,
     relatedId,
   }));
-  return Notification.insertMany(docs);
+  const students = await Student.find({ _id: { $in: studentIds } }).select("_id academyId");
+  const academyByStudent = new Map(students.map((student) => [student._id.toString(), student.academyId]));
+  return Notification.insertMany(docs.map((doc) => ({
+    ...doc,
+    academyId: academyByStudent.get(doc.student.toString()),
+  })));
 };
 
 module.exports = { notifyStudent, notifyStudents };

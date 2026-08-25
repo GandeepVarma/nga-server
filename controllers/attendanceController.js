@@ -3,9 +3,10 @@ const Attendance = require("../models/Attendance");
 const Student = require("../models/Student");
 const whatsapp = require("../services/whatsappService");
 const Settings = require("../models/Settings");
+const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
 const allowedStudentIds = async (req) => {
-  const filter = req.user.role === "admin" ? {} : { assignedTeacher: req.user._id };
+  const filter = req.user.role === "admin" ? { academyId: requireAcademyId(req) } : { academyId: requireAcademyId(req), assignedTeacher: req.user._id };
   const students = await Student.find(filter).select("_id");
   return students.map((s) => s._id.toString());
 };
@@ -35,8 +36,8 @@ const markAttendance = asyncHandler(async (req, res) => {
   const results = [];
   for (const { studentId, status } of records) {
     const record = await Attendance.findOneAndUpdate(
-      { student: studentId, date: new Date(date) },
-      { student: studentId, date: new Date(date), class: className, status, markedBy: req.user._id },
+      academyFilter(req, { student: studentId, date: new Date(date) }),
+      { academyId: requireAcademyId(req), student: studentId, date: new Date(date), class: className, status, markedBy: req.user._id },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
     results.push(record);
@@ -44,12 +45,12 @@ const markAttendance = asyncHandler(async (req, res) => {
 
   // Fire WhatsApp absent alerts in the background — never blocks the
   // response, and a failure here must never break attendance marking itself.
-  Settings.getSingleton()
+  Settings.getSingleton(requireAcademyId(req))
     .then(async (settings) => {
       if (!settings.whatsapp.notificationsEnabled.attendanceAlert) return;
       const absentIds = records.filter((r) => r.status === "Absent").map((r) => r.studentId);
       if (absentIds.length === 0) return;
-      const absentStudents = await Student.find({ _id: { $in: absentIds } });
+      const absentStudents = await Student.find({ academyId: requireAcademyId(req), _id: { $in: absentIds } });
       await Promise.all(absentStudents.map((s) => whatsapp.sendAttendanceAlert({ student: s, date })));
     })
     .catch((err) => console.error("[whatsapp] attendance alert failed:", err.message));
@@ -62,7 +63,7 @@ const markAttendance = asyncHandler(async (req, res) => {
 // @access  Staff (Admin or Teacher)
 const getAttendance = asyncHandler(async (req, res) => {
   const { class: className, date, student } = req.query;
-  const query = {};
+  const query = { academyId: requireAcademyId(req) };
   if (className) query.class = className;
   if (date) query.date = new Date(date);
   if (student) query.student = student;
@@ -92,14 +93,14 @@ const getTodaySummary = asyncHandler(async (req, res) => {
   endOfDay.setHours(23, 59, 59, 999);
 
   const allowedIds = req.user.role === "admin" ? null : await allowedStudentIds(req);
-  const query = { date: { $gte: startOfDay, $lte: endOfDay } };
+  const query = { academyId: requireAcademyId(req), date: { $gte: startOfDay, $lte: endOfDay } };
   if (allowedIds) query.student = { $in: allowedIds };
 
   const records = await Attendance.find(query);
   const totalStudents =
     req.user.role === "admin"
-      ? await Student.countDocuments({ status: "Active" })
-      : await Student.countDocuments({ status: "Active", assignedTeacher: req.user._id });
+      ? await Student.countDocuments({ academyId: requireAcademyId(req), status: "Active" })
+      : await Student.countDocuments({ academyId: requireAcademyId(req), status: "Active", assignedTeacher: req.user._id });
 
   const present = records.filter((r) => r.status === "Present").length;
   const absent = records.filter((r) => r.status === "Absent").length;
@@ -120,7 +121,7 @@ const getAttendancePercentage = asyncHandler(async (req, res) => {
     }
   }
 
-  const records = await Attendance.find({ student: req.params.studentId });
+  const records = await Attendance.find(academyFilter(req, { student: req.params.studentId }));
   const total = records.length;
   const present = records.filter((r) => r.status === "Present").length;
   const percentage = total > 0 ? Number(((present / total) * 100).toFixed(1)) : 0;

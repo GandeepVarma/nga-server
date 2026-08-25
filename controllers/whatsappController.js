@@ -3,12 +3,13 @@ const Settings = require("../models/Settings");
 const NotificationLog = require("../models/NotificationLog");
 const Student = require("../models/Student");
 const whatsapp = require("../services/whatsappService");
+const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
 // @desc    Get current WhatsApp settings (access token/webhook secret masked)
 // @route   GET /api/whatsapp/settings
 // @access  Admin
 const getSettings = asyncHandler(async (req, res) => {
-  const settings = await Settings.getSingleton();
+  const settings = await Settings.getSingleton(requireAcademyId(req));
   res.json({
     success: true,
     data: {
@@ -30,7 +31,7 @@ const getSettings = asyncHandler(async (req, res) => {
 // @route   PUT /api/whatsapp/settings
 // @access  Admin
 const updateSettings = asyncHandler(async (req, res) => {
-  const settings = await Settings.getSingleton();
+  const settings = await Settings.getSingleton(requireAcademyId(req));
   const { phoneNumberId, accessToken, webhookVerifyToken, businessAccountName, notificationsEnabled } = req.body;
 
   if (phoneNumberId !== undefined) settings.whatsapp.phoneNumberId = phoneNumberId;
@@ -61,7 +62,7 @@ const sendTestMessage = asyncHandler(async (req, res) => {
     sentBy: req.user._id,
   });
 
-  const settings = await Settings.getSingleton();
+  const settings = await Settings.getSingleton(requireAcademyId(req));
   settings.whatsapp.lastTestedAt = new Date();
   settings.whatsapp.lastTestStatus = log.status === "sent" ? "success" : "failed";
   settings.whatsapp.connected = log.status === "sent";
@@ -81,7 +82,7 @@ const sendBroadcastMessage = asyncHandler(async (req, res) => {
     throw new Error("Message text is required");
   }
 
-  const baseFilter = req.user.role === "admin" ? {} : { assignedTeacher: req.user._id };
+  const baseFilter = req.user.role === "admin" ? { academyId: requireAcademyId(req) } : { academyId: requireAcademyId(req), assignedTeacher: req.user._id };
   let recipients = [];
 
   if (target === "students" && Array.isArray(studentIds)) {
@@ -94,13 +95,13 @@ const sendBroadcastMessage = asyncHandler(async (req, res) => {
       throw new Error("Access denied: fee-based targeting is Admin only");
     }
     const Fee = require("../models/Fee");
-    const pendingStudentIds = await Fee.find({ pending: { $gt: 0 } }).distinct("student");
-    recipients = await Student.find({ _id: { $in: pendingStudentIds } });
+    const pendingStudentIds = await Fee.find({ academyId: requireAcademyId(req), pending: { $gt: 0 } }).distinct("student");
+    recipients = await Student.find({ academyId: requireAcademyId(req), _id: { $in: pendingStudentIds } });
   } else if (target === "absentToday") {
     const Attendance = require("../models/Attendance");
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
-    const absentIds = await Attendance.find({ status: "Absent", date: { $gte: startOfDay } }).distinct("student");
+    const absentIds = await Attendance.find({ academyId: requireAcademyId(req), status: "Absent", date: { $gte: startOfDay } }).distinct("student");
     recipients = await Student.find({ ...baseFilter, _id: { $in: absentIds } });
   } else {
     recipients = await Student.find({ ...baseFilter, status: "Active" });
@@ -120,7 +121,7 @@ const sendBroadcastMessage = asyncHandler(async (req, res) => {
 // @access  Staff (Admin sees all; Teacher sees only logs tied to their own students)
 const getLogs = asyncHandler(async (req, res) => {
   const { type, status, search, page = 1, limit = 20 } = req.query;
-  const query = {};
+  const query = { academyId: requireAcademyId(req) };
 
   if (type) query.type = type;
   if (status) query.status = status;
@@ -132,7 +133,7 @@ const getLogs = asyncHandler(async (req, res) => {
   }
 
   if (req.user.role !== "admin") {
-    const myStudentIds = await Student.find({ assignedTeacher: req.user._id }).distinct("_id");
+    const myStudentIds = await Student.find({ academyId: requireAcademyId(req), assignedTeacher: req.user._id }).distinct("_id");
     query.student = { $in: myStudentIds };
   }
 
@@ -167,7 +168,7 @@ const getLogs = asyncHandler(async (req, res) => {
 // @route   POST /api/whatsapp/logs/:id/retry
 // @access  Staff (Admin or the teacher whose student it was sent to)
 const retryMessage = asyncHandler(async (req, res) => {
-  const log = await NotificationLog.findById(req.params.id);
+  const log = await NotificationLog.findOne(academyFilter(req, { _id: req.params.id }));
   if (!log) {
     res.status(404);
     throw new Error("Log entry not found");
@@ -178,7 +179,7 @@ const retryMessage = asyncHandler(async (req, res) => {
   }
 
   if (req.user.role !== "admin" && log.student) {
-    const student = await Student.findOne({ _id: log.student, assignedTeacher: req.user._id });
+    const student = await Student.findOne({ academyId: requireAcademyId(req), _id: log.student, assignedTeacher: req.user._id });
     if (!student) {
       res.status(403);
       throw new Error("Access denied");

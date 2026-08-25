@@ -2,6 +2,7 @@ const asyncHandler = require("express-async-handler");
 const Fee = require("../models/Fee");
 const Student = require("../models/Student");
 const { notifyStudent } = require("../utils/notify");
+const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
 // NOTE: Every route using this controller (except getMyFees) is mounted
 // behind `adminOnly` middleware — per RBAC rules, Teachers must not access
@@ -17,21 +18,23 @@ const generateMonthlyFees = asyncHandler(async (req, res) => {
     throw new Error("month is required, format YYYY-MM");
   }
 
-  const students = await Student.find({ status: "Active" });
+  const academyId = requireAcademyId(req);
+  const students = await Student.find({ academyId, status: "Active" });
   const created = [];
 
   for (const student of students) {
-    const exists = await Fee.findOne({ student: student._id, month });
+    const exists = await Fee.findOne({ academyId, student: student._id, month });
     if (exists) continue;
 
     const [year, m] = month.split("-").map(Number);
     const prevDate = new Date(year, m - 2, 1);
     const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
-    const prevFee = await Fee.findOne({ student: student._id, month: prevMonth });
+    const prevFee = await Fee.findOne({ academyId, student: student._id, month: prevMonth });
     const carryForward = prevFee ? prevFee.pending : 0;
 
     const fee = await Fee.create({
       student: student._id,
+      academyId,
       month,
       amount: student.monthlyFee,
       carryForward,
@@ -53,7 +56,7 @@ const generateMonthlyFees = asyncHandler(async (req, res) => {
 // @access  Admin
 const getFees = asyncHandler(async (req, res) => {
   const { month, student, status } = req.query;
-  const query = {};
+  const query = { academyId: requireAcademyId(req) };
   if (month) query.month = month;
   if (student) query.student = student;
   if (status) query.status = status;
@@ -66,7 +69,7 @@ const getFees = asyncHandler(async (req, res) => {
 // @route   GET /api/fees/my
 // @access  Student
 const getMyFees = asyncHandler(async (req, res) => {
-  const fees = await Fee.find({ student: req.user._id }).sort({ month: -1 });
+  const fees = await Fee.find(academyFilter(req, { student: req.user._id })).sort({ month: -1 });
   res.json({ success: true, data: fees });
 });
 
@@ -80,7 +83,7 @@ const recordPayment = asyncHandler(async (req, res) => {
     throw new Error("A positive payment amount is required");
   }
 
-  const fee = await Fee.findById(req.params.id);
+  const fee = await Fee.findOne(academyFilter(req, { _id: req.params.id }));
   if (!fee) {
     res.status(404);
     throw new Error("Fee record not found");
@@ -107,7 +110,7 @@ const recordPayment = asyncHandler(async (req, res) => {
 // @route   GET /api/fees/summary
 // @access  Admin
 const getFeeSummary = asyncHandler(async (req, res) => {
-  const fees = await Fee.find().populate("student", "name studentId class");
+  const fees = await Fee.find({ academyId: requireAcademyId(req) }).populate("student", "name studentId class");
 
   const totalCollection = fees.reduce((sum, f) => sum + f.paid, 0);
   const pendingCollection = fees.reduce((sum, f) => sum + f.pending, 0);
@@ -150,7 +153,7 @@ const getFeeSummary = asyncHandler(async (req, res) => {
 // @route   POST /api/fees/:id/remind
 // @access  Admin
 const sendManualReminder = asyncHandler(async (req, res) => {
-  const fee = await Fee.findById(req.params.id).populate("student");
+  const fee = await Fee.findOne(academyFilter(req, { _id: req.params.id })).populate("student");
   if (!fee) {
     res.status(404);
     throw new Error("Fee record not found");

@@ -1,6 +1,7 @@
 const asyncHandler = require("express-async-handler");
 const OnlineTest = require("../models/OnlineTest");
 const Submission = require("../models/Submission");
+const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
 // @desc    List tests available to the logged-in student: published, in their
 //          class, within the availability window (or recently closed so they
@@ -10,12 +11,14 @@ const Submission = require("../models/Submission");
 const getMyTests = asyncHandler(async (req, res) => {
   const now = new Date();
   const tests = await OnlineTest.find({
+    academyId: requireAcademyId(req),
     published: true,
     classes: req.user.class,
     endTime: { $gte: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000) },
   }).sort({ startTime: 1 });
 
   const mySubmissions = await Submission.find({
+    academyId: requireAcademyId(req),
     student: req.user._id,
     test: { $in: tests.map((t) => t._id) },
   });
@@ -49,13 +52,13 @@ const getMyTests = asyncHandler(async (req, res) => {
 // @route   GET /api/online-tests/student/:id
 // @access  Student
 const getTestForStudent = asyncHandler(async (req, res) => {
-  const test = await OnlineTest.findOne({ _id: req.params.id, published: true, classes: req.user.class });
+  const test = await OnlineTest.findOne(academyFilter(req, { _id: req.params.id, published: true, classes: req.user.class }));
   if (!test) {
     res.status(404);
     throw new Error("Test not found or not available to your class");
   }
 
-  const submission = await Submission.findOne({ test: test._id, student: req.user._id });
+  const submission = await Submission.findOne(academyFilter(req, { test: test._id, student: req.user._id }));
 
   res.json({
     success: true,
@@ -73,7 +76,7 @@ const getTestForStudent = asyncHandler(async (req, res) => {
 // @route   POST /api/online-tests/student/:id/start
 // @access  Student
 const startTest = asyncHandler(async (req, res) => {
-  const test = await OnlineTest.findOne({ _id: req.params.id, published: true, classes: req.user.class });
+  const test = await OnlineTest.findOne(academyFilter(req, { _id: req.params.id, published: true, classes: req.user.class }));
   if (!test) {
     res.status(404);
     throw new Error("Test not found or not available to your class");
@@ -89,7 +92,7 @@ const startTest = asyncHandler(async (req, res) => {
     throw new Error("This test's window has closed");
   }
 
-  let submission = await Submission.findOne({ test: test._id, student: req.user._id });
+  let submission = await Submission.findOne(academyFilter(req, { test: test._id, student: req.user._id }));
   if (submission) {
     if (submission.submittedAt) {
       res.status(400);
@@ -97,6 +100,7 @@ const startTest = asyncHandler(async (req, res) => {
     }
   } else {
     submission = await Submission.create({
+      academyId: requireAcademyId(req),
       test: test._id,
       student: req.user._id,
       startedAt: now,
@@ -117,7 +121,7 @@ const startTest = asyncHandler(async (req, res) => {
 // @route   POST /api/online-tests/student/:id/save
 // @access  Student
 const saveProgress = asyncHandler(async (req, res) => {
-  const submission = await Submission.findOne({ test: req.params.id, student: req.user._id });
+  const submission = await Submission.findOne(academyFilter(req, { test: req.params.id, student: req.user._id }));
   if (!submission) {
     res.status(404);
     throw new Error("No active attempt found — start the test first");
@@ -179,13 +183,13 @@ const scoreSubmission = (test, submission) => {
 // @body    { autoSubmitted?: boolean, answers?: [...] }
 // @access  Student
 const submitTest = asyncHandler(async (req, res) => {
-  const test = await OnlineTest.findById(req.params.id);
+  const test = await OnlineTest.findOne(academyFilter(req, { _id: req.params.id }));
   if (!test) {
     res.status(404);
     throw new Error("Test not found");
   }
 
-  const submission = await Submission.findOne({ test: test._id, student: req.user._id });
+  const submission = await Submission.findOne(academyFilter(req, { test: test._id, student: req.user._id }));
   if (!submission) {
     res.status(404);
     throw new Error("No active attempt found — start the test first");
@@ -223,13 +227,13 @@ const submitTest = asyncHandler(async (req, res) => {
 // @route   GET /api/online-tests/student/:id/result
 // @access  Student
 const getResult = asyncHandler(async (req, res) => {
-  const test = await OnlineTest.findById(req.params.id);
+  const test = await OnlineTest.findOne(academyFilter(req, { _id: req.params.id }));
   if (!test) {
     res.status(404);
     throw new Error("Test not found");
   }
 
-  const submission = await Submission.findOne({ test: test._id, student: req.user._id });
+  const submission = await Submission.findOne(academyFilter(req, { test: test._id, student: req.user._id }));
   if (!submission || !submission.submittedAt) {
     res.status(404);
     throw new Error("No completed attempt found for this test");
