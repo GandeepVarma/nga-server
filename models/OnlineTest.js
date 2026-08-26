@@ -28,12 +28,14 @@ const onlineTestSchema = new mongoose.Schema(
     academyId: { type: mongoose.Schema.Types.ObjectId, ref: "Academy", required: true, index: true },
     title: { type: String, required: true, trim: true },
     subject: { type: String, required: true, trim: true },
-    // One test can be assigned to several classes/batches at once
+    // Legacy assignment field retained for existing tests. New tests use the
+    // exact class + batch pair below.
     classes: {
       type: [String],
-      required: true,
-      validate: { validator: (arr) => arr.length > 0, message: "Assign at least one class" },
+      default: undefined,
     },
+    class: { type: String, trim: true },
+    batch: { type: String, trim: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "Teacher", required: true },
     duration: { type: Number, required: true, min: 1 }, // minutes
     instructions: { type: String, default: "" },
@@ -49,6 +51,8 @@ const onlineTestSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+onlineTestSchema.index({ academyId: 1, class: 1, batch: 1 });
 
 onlineTestSchema.virtual("totalMarks").get(function () {
   return this.questions.reduce((sum, q) => sum + q.marks, 0);

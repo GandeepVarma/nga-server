@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   createTest, getTests, getTestById, updateTest, setPublishStatus,
   duplicateTest, deleteTest, getAnalytics, getSubmissions, exportSubmissionsCSV,
+  getAssignmentOptions,
 } = require("../controllers/onlineTestController");
 const {
   getMyTests, getTestForStudent, startTest, saveProgress, submitTest, getResult,
@@ -16,6 +17,8 @@ router.post("/student/:id/start", protect, studentOnly, startTest);
 router.post("/student/:id/save", protect, studentOnly, saveProgress);
 router.post("/student/:id/submit", protect, studentOnly, submitTest);
 router.get("/student/:id/result", protect, studentOnly, getResult);
+
+router.get("/assignment-options", protect, teacherOnly, getAssignmentOptions);
 
 // ---------- Staff routes (Admin sees/manages all; Teacher scoped to own tests) ----------
 router.route("/").post(protect, teacherOnly, createTest).get(protect, teacherOnly, getTests);

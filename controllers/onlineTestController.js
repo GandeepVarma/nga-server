@@ -6,6 +6,35 @@ const whatsapp = require("../services/whatsappService");
 const Settings = require("../models/Settings");
 const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
+const assignmentFilter = (req, test = {}) => ({
+  ...test,
+  academyId: requireAcademyId(req),
+  class: req.user.class,
+  batch: req.user.batch,
+});
+
+const assertAssignmentExists = async (req, className, batch) => {
+  const filter = { academyId: requireAcademyId(req), class: className, batch };
+  if (req.user.role !== "admin") filter.assignedTeacher = req.user._id;
+  const student = await Student.exists(filter);
+  if (!student) {
+    const err = new Error("The selected batch does not belong to this academy and class");
+    err.status = 400;
+    throw err;
+  }
+};
+
+// Staff assignment options are derived from tenant-scoped student records.
+const getAssignmentOptions = asyncHandler(async (req, res) => {
+  const filter = { academyId: requireAcademyId(req) };
+  if (req.user.role !== "admin") filter.assignedTeacher = req.user._id;
+  const classes = await Student.find(filter).distinct("class");
+  const batches = req.query.class
+    ? await Student.find({ ...filter, class: req.query.class }).distinct("batch")
+    : [];
+  res.json({ success: true, data: { classes: classes.filter(Boolean).sort(), batches: batches.filter(Boolean).sort() } });
+});
+
 // A teacher may only build tests for classes where they actually have
 // assigned students — prevents a teacher from silently reaching students
 // that aren't theirs by just typing a class name into the form.
@@ -41,13 +70,13 @@ const findOwnedTest = async (req, id) => {
 // @access  Staff (Admin or Teacher)
 const createTest = asyncHandler(async (req, res) => {
   const {
-    title, subject, classes, duration, instructions, startTime, endTime,
+    title, subject, class: className, batch, duration, instructions, startTime, endTime,
     negativeMarking, randomizeQuestions, showResults, allowReview, passPercentage, questions,
   } = req.body;
 
-  if (!title || !subject || !classes?.length || !duration || !startTime || !endTime) {
+  if (!title || !subject || !className || !batch || !duration || !startTime || !endTime) {
     res.status(400);
-    throw new Error("title, subject, classes[], duration, startTime and endTime are required");
+    throw new Error("title, subject, class, batch, duration, startTime and endTime are required");
   }
   if (new Date(endTime) <= new Date(startTime)) {
     res.status(400);
@@ -55,14 +84,14 @@ const createTest = asyncHandler(async (req, res) => {
   }
 
   try {
-    await assertClassesOwnedByTeacher(req, classes);
+    await assertAssignmentExists(req, className, batch);
   } catch (err) {
     res.status(err.status || 403);
     throw err;
   }
 
   const test = await OnlineTest.create({
-    title, subject, classes, duration, instructions,
+    title, subject, class: className, batch, duration, instructions,
     startTime, endTime,
     negativeMarking: negativeMarking || 0,
     randomizeQuestions: !!randomizeQuestions,
@@ -125,9 +154,9 @@ const updateTest = asyncHandler(async (req, res) => {
     throw new Error("This test is published — unpublish it before editing, or ask an Admin to edit it directly");
   }
 
-  if (req.body.classes) {
+  if (req.body.class || req.body.batch) {
     try {
-      await assertClassesOwnedByTeacher(req, req.body.classes);
+      await assertAssignmentExists(req, req.body.class || test.class, req.body.batch || test.batch);
     } catch (err) {
       res.status(err.status || 403);
       throw err;
@@ -135,7 +164,7 @@ const updateTest = asyncHandler(async (req, res) => {
   }
 
   const fields = [
-    "title", "subject", "classes", "duration", "instructions", "startTime", "endTime",
+    "title", "subject", "class", "batch", "duration", "instructions", "startTime", "endTime",
     "negativeMarking", "randomizeQuestions", "showResults", "allowReview", "passPercentage", "questions",
   ];
   fields.forEach((f) => { if (req.body[f] !== undefined) test[f] = req.body[f]; });
@@ -165,7 +194,7 @@ const setPublishStatus = asyncHandler(async (req, res) => {
     Settings.getSingleton(requireAcademyId(req))
       .then(async (settings) => {
         if (!settings.whatsapp.notificationsEnabled.testAnnouncement) return;
-        const students = await Student.find({ academyId: requireAcademyId(req), class: { $in: test.classes }, status: "Active" });
+        const students = await Student.find({ academyId: requireAcademyId(req), class: test.class, batch: test.batch, status: "Active" });
         await Promise.all(students.map((s) => whatsapp.sendTestAnnouncement({ student: s, test })));
       })
       .catch((err) => console.error("[whatsapp] test announcement failed:", err.message));
@@ -183,10 +212,14 @@ const duplicateTest = asyncHandler(async (req, res) => {
     throw err;
   });
 
+  const className = req.body.class || test.class;
+  const batch = req.body.batch || test.batch;
+  await assertAssignmentExists(req, className, batch);
   const copy = await OnlineTest.create({
     title: `${test.title} (Copy)`,
     subject: test.subject,
-    classes: test.classes,
+    class: className,
+    batch,
     duration: test.duration,
     instructions: test.instructions,
     startTime: test.startTime,
@@ -229,7 +262,7 @@ const getAnalytics = asyncHandler(async (req, res) => {
   });
 
   const [assignedCount, submissions] = await Promise.all([
-    Student.countDocuments({ academyId: requireAcademyId(req), class: { $in: test.classes }, status: "Active" }),
+    Student.countDocuments({ academyId: requireAcademyId(req), class: test.class, batch: test.batch, status: "Active" }),
     Submission.find({ academyId: requireAcademyId(req), test: test._id, submittedAt: { $ne: null } }).populate("student", "name studentId"),
   ]);
 
@@ -333,5 +366,5 @@ const exportSubmissionsCSV = asyncHandler(async (req, res) => {
 
 module.exports = {
   createTest, getTests, getTestById, updateTest, setPublishStatus,
-  duplicateTest, deleteTest, getAnalytics, getSubmissions, exportSubmissionsCSV,
+  duplicateTest, deleteTest, getAnalytics, getSubmissions, exportSubmissionsCSV, getAssignmentOptions,
 };
