@@ -2,6 +2,9 @@ const asyncHandler = require("express-async-handler");
 const Plan = require("../models/Plan");
 const Academy = require("../models/Academy");
 const Teacher = require("../models/Teacher");
+const Program = require("../models/Program");
+const Story = require("../models/Story");
+const DigitalHub = require("../models/DigitalHub");
 
 // @desc    Active pricing plans for the public Pricing page
 // @route   GET /api/public/plans
@@ -20,6 +23,34 @@ const getPublicAcademies = asyncHandler(async (req, res) => {
     .select("academyId academyName logo")
     .sort({ academyName: 1 });
   res.json({ success: true, data: academies });
+});
+
+// @desc  Active programs from active academies for the public Programs page
+// @route GET /api/public/programs
+// @access Public
+const getPublicPrograms = asyncHandler(async (req, res) => {
+  const activeAcademies = await Academy.find({ status: "ACTIVE" }).select("_id academyName").lean();
+  const academyIds = activeAcademies.map((academy) => academy._id);
+  const academyNames = new Map(activeAcademies.map((academy) => [String(academy._id), academy.academyName]));
+  const programs = await Program.find({ academyId: { $in: academyIds }, isActive: true })
+    .sort({ sortOrder: 1, createdAt: 1 })
+    .lean();
+  res.json({
+    success: true,
+    data: programs.map((program) => ({ ...program, academyName: academyNames.get(String(program.academyId)) || "" })),
+  });
+});
+
+const getPublicStory = asyncHandler(async (req, res) => {
+  const academy = await Academy.findOne({ status: "ACTIVE" }).select("_id academyName").sort({ isFounderAcademy: -1, createdAt: 1 });
+  const story = academy ? await Story.findOne({ academyId: academy._id }).lean() : null;
+  res.json({ success: true, data: story ? { ...story, academyName: academy.academyName } : null });
+});
+
+const getPublicDigitalHub = asyncHandler(async (req, res) => {
+  const academy = await Academy.findOne({ status: "ACTIVE" }).select("_id").sort({ isFounderAcademy: -1, createdAt: 1 });
+  const hub = academy ? await DigitalHub.findOne({ academyId: academy._id }).lean() : null;
+  res.json({ success: true, data: hub });
 });
 
 // @desc    New academy self-registration. Creates the Academy (status
@@ -98,4 +129,4 @@ const registerAcademy = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { getPublicPlans, getPublicAcademies, registerAcademy };
+module.exports = { getPublicPlans, getPublicAcademies, getPublicPrograms, getPublicStory, getPublicDigitalHub, registerAcademy };

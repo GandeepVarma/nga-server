@@ -19,6 +19,9 @@ const aiQuestionRoutes = require("./routes/aiQuestionRoutes");
 const whatsappRoutes = require("./routes/whatsappRoutes");
 const superAdminRoutes = require("./routes/superAdminRoutes");
 const publicRoutes = require("./routes/publicRoutes");
+const programRoutes = require("./routes/programRoutes");
+const storyRoutes = require("./routes/storyRoutes");
+const digitalHubRoutes = require("./routes/digitalHubRoutes");
 const { startScheduledJobs } = require("./jobs/notificationScheduler");
 
 connectDB();
@@ -53,6 +56,9 @@ app.use("/api/ai-questions", aiQuestionRoutes);
 app.use("/api/whatsapp", whatsappRoutes);
 app.use("/api/super-admin", superAdminRoutes);
 app.use("/api/public", publicRoutes);
+app.use("/api/admin/programs", programRoutes);
+app.use("/api/admin/story", storyRoutes);
+app.use("/api/admin/digital-hub", digitalHubRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
