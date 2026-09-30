@@ -19,36 +19,43 @@ const allowedStudentIds = async (req) => {
 const markAttendance = asyncHandler(async (req, res) => {
   const { date, class: className, records } = req.body;
 
-  if (!date || !className || !Array.isArray(records)) {
+  if (!date || !Array.isArray(records) || records.length === 0) {
     res.status(400);
-    throw new Error("date, class and records[] are required");
+    throw new Error("date and records[] are required");
+  }
+
+  const recordsWithClasses = records.map((record) => ({
+    ...record,
+    class: record.class || className,
+  }));
+  if (recordsWithClasses.some((record) => !record.studentId || !record.class || !["Present", "Absent", "Leave"].includes(record.status))) {
+    res.status(400);
+    throw new Error("Each record requires a studentId, class and valid status");
   }
 
   if (req.user.role !== "admin") {
     const allowedIds = await allowedStudentIds(req);
-    const invalid = records.filter((r) => !allowedIds.includes(r.studentId.toString()));
+    const invalid = recordsWithClasses.filter((r) => !allowedIds.includes(r.studentId.toString()));
     if (invalid.length > 0) {
       res.status(403);
       throw new Error("Access denied: one or more students are not assigned to you");
     }
   }
 
-  const results = [];
-  for (const { studentId, status } of records) {
-    const record = await Attendance.findOneAndUpdate(
+  const results = await Promise.all(recordsWithClasses.map(({ studentId, status, class: recordClass }) =>
+    Attendance.findOneAndUpdate(
       academyFilter(req, { student: studentId, date: new Date(date) }),
-      { academyId: requireAcademyId(req), student: studentId, date: new Date(date), class: className, status, markedBy: req.user._id },
+      { academyId: requireAcademyId(req), student: studentId, date: new Date(date), class: recordClass, status, markedBy: req.user._id },
       { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-    results.push(record);
-  }
+    )
+  ));
 
   // Fire WhatsApp absent alerts in the background — never blocks the
   // response, and a failure here must never break attendance marking itself.
   Settings.getSingleton(requireAcademyId(req))
     .then(async (settings) => {
       if (!settings.whatsapp.notificationsEnabled.attendanceAlert) return;
-      const absentIds = records.filter((r) => r.status === "Absent").map((r) => r.studentId);
+      const absentIds = recordsWithClasses.filter((r) => r.status === "Absent").map((r) => r.studentId);
       if (absentIds.length === 0) return;
       const absentStudents = await Student.find({ academyId: requireAcademyId(req), _id: { $in: absentIds } });
       await Promise.all(absentStudents.map((s) => whatsapp.sendAttendanceAlert({ student: s, date })));
