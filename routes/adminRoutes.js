@@ -8,6 +8,8 @@ const {
   resetTeacherPassword,
   assignStudents,
   reassignStudent,
+  getStudentsAttendanceSummary,
+  getStudentAttendanceHistory,
   getAdminDashboard,
 } = require("../controllers/adminController");
 const { protect, adminOnly } = require("../middleware/auth");
@@ -16,6 +18,8 @@ const { protect, adminOnly } = require("../middleware/auth");
 router.use(protect, adminOnly);
 
 router.get("/dashboard", getAdminDashboard);
+router.get("/students/attendance-summary", getStudentsAttendanceSummary);
+router.get("/students/:studentId/attendance", getStudentAttendanceHistory);
 
 router.route("/teachers").post(createTeacher).get(getTeachers);
 router.put("/teachers/:id", updateTeacher);

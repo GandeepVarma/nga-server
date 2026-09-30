@@ -179,6 +179,67 @@ const reassignStudent = asyncHandler(async (req, res) => {
   res.json({ success: true, message: `${student.name} reassigned to ${teacher.name}` });
 });
 
+const getStudentsAttendanceSummary = asyncHandler(async (req, res) => {
+  const summaries = await Attendance.aggregate([
+    { $match: { academyId: requireAcademyId(req) } },
+    {
+      $group: {
+        _id: "$student",
+        totalDays: { $sum: 1 },
+        presentDays: { $sum: { $cond: [{ $eq: ["$status", "Present"] }, 1, 0] } },
+        absentDays: { $sum: { $cond: [{ $eq: ["$status", "Absent"] }, 1, 0] } },
+        leaveDays: { $sum: { $cond: [{ $eq: ["$status", "Leave"] }, 1, 0] } },
+      },
+    },
+    {
+      $project: {
+        totalDays: 1,
+        presentDays: 1,
+        absentDays: 1,
+        leaveDays: 1,
+        attendancePercent: { $multiply: [{ $divide: ["$presentDays", "$totalDays"] }, 100] },
+      },
+    },
+  ]);
+
+  res.json({ success: true, data: summaries });
+});
+
+const getStudentAttendanceHistory = asyncHandler(async (req, res) => {
+  const academyId = requireAcademyId(req);
+  const student = await Student.findOne({ academyId, _id: req.params.studentId })
+    .select("name studentId class")
+    .lean();
+  if (!student) {
+    res.status(404);
+    throw new Error("Student not found");
+  }
+
+  const records = await Attendance.find({ academyId, student: student._id })
+    .select("date status")
+    .sort({ date: -1 })
+    .lean();
+  const presentDays = records.filter((record) => record.status === "Present").length;
+  const absentDays = records.filter((record) => record.status === "Absent").length;
+  const leaveDays = records.filter((record) => record.status === "Leave").length;
+  const totalDays = records.length;
+
+  res.json({
+    success: true,
+    data: {
+      student,
+      summary: {
+        totalDays,
+        presentDays,
+        absentDays,
+        leaveDays,
+        attendancePercent: totalDays > 0 ? Number(((presentDays / totalDays) * 100).toFixed(2)) : null,
+      },
+      records,
+    },
+  });
+});
+
 // ---------- Academy-wide dashboard (Admin only) ----------
 
 // @desc    Full academy statistics for the Admin dashboard
@@ -620,5 +681,7 @@ module.exports = {
   resetTeacherPassword,
   assignStudents,
   reassignStudent,
+  getStudentsAttendanceSummary,
+  getStudentAttendanceHistory,
   getAdminDashboard,
 };
