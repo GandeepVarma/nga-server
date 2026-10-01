@@ -5,6 +5,7 @@ const Teacher = require("../models/Teacher");
 const Program = require("../models/Program");
 const Story = require("../models/Story");
 const DigitalHub = require("../models/DigitalHub");
+const StudentResult = require("../models/StudentResult");
 
 // @desc    Active pricing plans for the public Pricing page
 // @route   GET /api/public/plans
@@ -51,6 +52,18 @@ const getPublicDigitalHub = asyncHandler(async (req, res) => {
   const academy = await Academy.findOne({ status: "ACTIVE" }).select("_id").sort({ isFounderAcademy: -1, createdAt: 1 });
   const hub = academy ? await DigitalHub.findOne({ academyId: academy._id }).lean() : null;
   res.json({ success: true, data: hub });
+});
+
+const getPublicResults = asyncHandler(async (req, res) => {
+  const academies = await Academy.find({ status: "ACTIVE" }).select("_id academyName").lean();
+  const academyNames = new Map(academies.map((academy) => [String(academy._id), academy.academyName]));
+  const results = await StudentResult.find({ academyId: { $in: academies.map((academy) => academy._id) } })
+    .sort({ sortOrder: 1, createdAt: -1 })
+    .lean();
+  res.json({
+    success: true,
+    data: results.map((result) => ({ ...result, academyName: academyNames.get(String(result.academyId)) || "" })),
+  });
 });
 
 // @desc    New academy self-registration. Creates the Academy (status
@@ -129,4 +142,4 @@ const registerAcademy = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { getPublicPlans, getPublicAcademies, getPublicPrograms, getPublicStory, getPublicDigitalHub, registerAcademy };
+module.exports = { getPublicPlans, getPublicAcademies, getPublicPrograms, getPublicStory, getPublicDigitalHub, getPublicResults, registerAcademy };

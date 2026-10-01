@@ -22,6 +22,7 @@ const publicRoutes = require("./routes/publicRoutes");
 const programRoutes = require("./routes/programRoutes");
 const storyRoutes = require("./routes/storyRoutes");
 const digitalHubRoutes = require("./routes/digitalHubRoutes");
+const studentResultRoutes = require("./routes/studentResultRoutes");
 const { startScheduledJobs } = require("./jobs/notificationScheduler");
 
 connectDB();
@@ -59,6 +60,7 @@ app.use("/api/public", publicRoutes);
 app.use("/api/admin/programs", programRoutes);
 app.use("/api/admin/story", storyRoutes);
 app.use("/api/admin/digital-hub", digitalHubRoutes);
+app.use("/api/admin/results", studentResultRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
