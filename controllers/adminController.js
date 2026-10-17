@@ -59,6 +59,30 @@ const getTeachers = asyncHandler(async (req, res) => {
   res.json({ success: true, count: withCounts.length, data: withCounts });
 });
 
+// @desc    Expected monthly fees from active students
+// @route   GET /api/admin/earnings
+// @access  Admin
+const getMonthlyEarnings = asyncHandler(async (req, res) => {
+  const [summary] = await Student.aggregate([
+    { $match: { academyId: requireAcademyId(req), status: "Active" } },
+    {
+      $group: {
+        _id: null,
+        activeStudentCount: { $sum: 1 },
+        monthlyEarnings: { $sum: { $ifNull: ["$monthlyFee", 0] } },
+      },
+    },
+  ]);
+
+  res.json({
+    success: true,
+    data: {
+      activeStudentCount: summary?.activeStudentCount || 0,
+      monthlyEarnings: summary?.monthlyEarnings || 0,
+    },
+  });
+});
+
 // @desc    Update a teacher's details
 // @route   PUT /api/admin/teachers/:id
 // @access  Admin
@@ -676,6 +700,7 @@ const getAdminDashboard = asyncHandler(async (req, res) => {
 module.exports = {
   createTeacher,
   getTeachers,
+  getMonthlyEarnings,
   updateTeacher,
   setTeacherStatus,
   resetTeacherPassword,

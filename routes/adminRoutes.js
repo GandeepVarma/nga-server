@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   createTeacher,
   getTeachers,
+  getMonthlyEarnings,
   updateTeacher,
   setTeacherStatus,
   resetTeacherPassword,
@@ -18,6 +19,7 @@ const { protect, adminOnly } = require("../middleware/auth");
 router.use(protect, adminOnly);
 
 router.get("/dashboard", getAdminDashboard);
+router.get("/earnings", getMonthlyEarnings);
 router.get("/students/attendance-summary", getStudentsAttendanceSummary);
 router.get("/students/:studentId/attendance", getStudentAttendanceHistory);
 

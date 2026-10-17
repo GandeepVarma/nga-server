@@ -89,6 +89,12 @@ const recordPayment = asyncHandler(async (req, res) => {
     throw new Error("Fee record not found");
   }
 
+  const studentExists = await Student.exists({ _id: fee.student, academyId: requireAcademyId(req) });
+  if (!studentExists) {
+    res.status(404);
+    throw new Error("The student for this fee record no longer exists. Delete the fee record instead.");
+  }
+
   fee.paid += Number(amount);
   fee.paymentDate = new Date();
   fee.modeOfPayment = modeOfPayment || "Cash";
@@ -104,6 +110,42 @@ const recordPayment = asyncHandler(async (req, res) => {
   );
 
   res.json({ success: true, data: fee });
+});
+
+// @desc    Undo all payments recorded against one monthly fee record
+// @route   PUT /api/fees/:id/undo-payment
+// @access  Admin
+const undoPayment = asyncHandler(async (req, res) => {
+  const fee = await Fee.findOne(academyFilter(req, { _id: req.params.id }));
+  if (!fee) {
+    res.status(404);
+    throw new Error("Fee record not found");
+  }
+  if (fee.paid <= 0) {
+    res.status(400);
+    throw new Error("This fee record has no payment to undo");
+  }
+
+  fee.paid = 0;
+  fee.paymentDate = null;
+  fee.modeOfPayment = null;
+  fee.receiptNumber = null;
+  await fee.save();
+
+  res.json({ success: true, data: fee });
+});
+
+// @desc    Delete one monthly fee record
+// @route   DELETE /api/fees/:id
+// @access  Admin
+const deleteFee = asyncHandler(async (req, res) => {
+  const fee = await Fee.findOneAndDelete(academyFilter(req, { _id: req.params.id }));
+  if (!fee) {
+    res.status(404);
+    throw new Error("Fee record not found");
+  }
+
+  res.json({ success: true, message: "Fee record deleted" });
 });
 
 // @desc    Fee summary for the Admin dashboard
@@ -126,6 +168,9 @@ const getFeeSummary = asyncHandler(async (req, res) => {
     monthWise[f.month].collected += f.paid;
     monthWise[f.month].pending += f.pending;
   });
+  const currentDate = new Date();
+  const currentMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, "0")}`;
+  const monthlyCollection = monthWise[currentMonth]?.collected || 0;
 
   const studentWise = {};
   fees.forEach((f) => {
@@ -142,6 +187,7 @@ const getFeeSummary = asyncHandler(async (req, res) => {
       totalCollection,
       pendingCollection,
       todaysCollection,
+      monthlyCollection,
       monthWise,
       studentWise: Object.values(studentWise),
     },
@@ -171,4 +217,13 @@ const sendManualReminder = asyncHandler(async (req, res) => {
   res.json({ success: log.status === "sent", data: log });
 });
 
-module.exports = { generateMonthlyFees, getFees, getMyFees, recordPayment, getFeeSummary, sendManualReminder };
+module.exports = {
+  generateMonthlyFees,
+  getFees,
+  getMyFees,
+  recordPayment,
+  undoPayment,
+  deleteFee,
+  getFeeSummary,
+  sendManualReminder,
+};
