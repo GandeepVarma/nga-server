@@ -170,7 +170,7 @@ const updateMarks = asyncHandler(async (req, res) => {
   // that were actually entered (not cleared to null) in this call.
   Settings.getSingleton(requireAcademyId(req))
     .then(async (settings) => {
-      if (!settings.whatsapp.notificationsEnabled.resultNotification) return;
+      if (!settings.whatsapp.autoNotificationsEnabled || !settings.whatsapp.notificationsEnabled.resultNotification) return;
       const graded = marks.filter((m) => m.marksObtained !== "" && m.marksObtained !== null);
       if (graded.length === 0) return;
       const studentDocs = await Student.find({ academyId: requireAcademyId(req), _id: { $in: graded.map((m) => m.studentId) } });

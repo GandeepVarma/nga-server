@@ -24,7 +24,7 @@ const runFeeReminders = async () => {
   const academies = await Academy.find({ status: "ACTIVE" }).select("_id");
   for (const academy of academies) {
     const settings = await Settings.getSingleton(academy._id);
-    if (!settings.whatsapp.notificationsEnabled.feeReminder) continue;
+    if (!settings.whatsapp.autoNotificationsEnabled || !settings.whatsapp.notificationsEnabled.feeReminder) continue;
     const fees = await Fee.find({ academyId: academy._id, dueDate: { $ne: null }, pending: { $gt: 0 } }).populate("student");
     const now = new Date();
     for (const fee of fees) {
@@ -43,7 +43,7 @@ const runHomeworkReminders = async () => {
   const academies = await Academy.find({ status: "ACTIVE" }).select("_id");
   for (const academy of academies) {
     const settings = await Settings.getSingleton(academy._id);
-    if (!settings.whatsapp.notificationsEnabled.homeworkReminder) continue;
+    if (!settings.whatsapp.autoNotificationsEnabled || !settings.whatsapp.notificationsEnabled.homeworkReminder) continue;
     const now = new Date();
     const assignments = await Assignment.find({ academyId: academy._id }).populate("assignedStudents.student");
     for (const assignment of assignments) {
@@ -69,7 +69,7 @@ const runTestReminders = async () => {
 
   for (const academy of academies) {
     const settings = await Settings.getSingleton(academy._id);
-    if (!settings.whatsapp.notificationsEnabled.testAnnouncement) continue;
+    if (!settings.whatsapp.autoNotificationsEnabled || !settings.whatsapp.notificationsEnabled.testAnnouncement) continue;
     const tests = await OnlineTest.find({ academyId: academy._id, published: true });
     for (const test of tests) {
     for (const w of windows) {

@@ -18,6 +18,7 @@ const getSettings = asyncHandler(async (req, res) => {
       connected: settings.whatsapp.connected,
       lastTestedAt: settings.whatsapp.lastTestedAt,
       lastTestStatus: settings.whatsapp.lastTestStatus,
+      autoNotificationsEnabled: settings.whatsapp.autoNotificationsEnabled,
       notificationsEnabled: settings.whatsapp.notificationsEnabled,
       accessTokenSet: !!settings.whatsapp.accessToken,
       webhookVerifyTokenSet: !!settings.whatsapp.webhookVerifyToken,
@@ -32,12 +33,20 @@ const getSettings = asyncHandler(async (req, res) => {
 // @access  Admin
 const updateSettings = asyncHandler(async (req, res) => {
   const settings = await Settings.getSingleton(requireAcademyId(req));
-  const { phoneNumberId, accessToken, webhookVerifyToken, businessAccountName, notificationsEnabled } = req.body;
+  const {
+    phoneNumberId,
+    accessToken,
+    webhookVerifyToken,
+    businessAccountName,
+    autoNotificationsEnabled,
+    notificationsEnabled,
+  } = req.body;
 
   if (phoneNumberId !== undefined) settings.whatsapp.phoneNumberId = phoneNumberId;
   if (businessAccountName !== undefined) settings.whatsapp.businessAccountName = businessAccountName;
   if (accessToken) settings.whatsapp.accessToken = accessToken;
   if (webhookVerifyToken) settings.whatsapp.webhookVerifyToken = webhookVerifyToken;
+  if (autoNotificationsEnabled !== undefined) settings.whatsapp.autoNotificationsEnabled = autoNotificationsEnabled;
   if (notificationsEnabled) Object.assign(settings.whatsapp.notificationsEnabled, notificationsEnabled);
 
   await settings.save();

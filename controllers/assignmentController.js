@@ -75,7 +75,7 @@ const createAssignment = asyncHandler(async (req, res) => {
   // still Pending — dedupeKey prevents that from double-sending this one).
   Settings.getSingleton(requireAcademyId(req))
     .then(async (settings) => {
-      if (!settings.whatsapp.notificationsEnabled.homeworkReminder) return;
+      if (!settings.whatsapp.autoNotificationsEnabled || !settings.whatsapp.notificationsEnabled.homeworkReminder) return;
       const studentDocs = await Student.find({ academyId: requireAcademyId(req), _id: { $in: students } });
       await Promise.all(studentDocs.map((s) => whatsapp.sendHomeworkReminder({ student: s, assignment })));
     })

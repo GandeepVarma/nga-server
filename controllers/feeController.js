@@ -61,7 +61,9 @@ const getFees = asyncHandler(async (req, res) => {
   if (student) query.student = student;
   if (status) query.status = status;
 
-  const fees = await Fee.find(query).populate("student", "name studentId class").sort({ month: -1 });
+  const fees = await Fee.find(query)
+    .populate("student", "name studentId class parentName phone")
+    .sort({ month: -1 });
   res.json({ success: true, count: fees.length, data: fees });
 });
 

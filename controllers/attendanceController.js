@@ -54,7 +54,7 @@ const markAttendance = asyncHandler(async (req, res) => {
   // response, and a failure here must never break attendance marking itself.
   Settings.getSingleton(requireAcademyId(req))
     .then(async (settings) => {
-      if (!settings.whatsapp.notificationsEnabled.attendanceAlert) return;
+      if (!settings.whatsapp.autoNotificationsEnabled || !settings.whatsapp.notificationsEnabled.attendanceAlert) return;
       const absentIds = recordsWithClasses.filter((r) => r.status === "Absent").map((r) => r.studentId);
       if (absentIds.length === 0) return;
       const absentStudents = await Student.find({ academyId: requireAcademyId(req), _id: { $in: absentIds } });

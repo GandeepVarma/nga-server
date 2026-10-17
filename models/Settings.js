@@ -22,6 +22,7 @@ const settingsSchema = new mongoose.Schema(
       connected: { type: Boolean, default: false },
       lastTestedAt: { type: Date, default: null },
       lastTestStatus: { type: String, enum: ["success", "failed", null], default: null },
+      autoNotificationsEnabled: { type: Boolean, default: true },
       // Per-notification-type on/off switches
       notificationsEnabled: {
         feeReminder: { type: Boolean, default: true },

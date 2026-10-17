@@ -193,7 +193,7 @@ const setPublishStatus = asyncHandler(async (req, res) => {
   if (test.published) {
     Settings.getSingleton(requireAcademyId(req))
       .then(async (settings) => {
-        if (!settings.whatsapp.notificationsEnabled.testAnnouncement) return;
+        if (!settings.whatsapp.autoNotificationsEnabled || !settings.whatsapp.notificationsEnabled.testAnnouncement) return;
         const students = await Student.find({ academyId: requireAcademyId(req), class: test.class, batch: test.batch, status: "Active" });
         await Promise.all(students.map((s) => whatsapp.sendTestAnnouncement({ student: s, test })));
       })
