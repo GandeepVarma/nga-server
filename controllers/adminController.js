@@ -63,22 +63,54 @@ const getTeachers = asyncHandler(async (req, res) => {
 // @route   GET /api/admin/earnings
 // @access  Admin
 const getMonthlyEarnings = asyncHandler(async (req, res) => {
-  const [summary] = await Student.aggregate([
+  const classes = await Student.aggregate([
     { $match: { academyId: requireAcademyId(req), status: "Active" } },
     {
       $group: {
-        _id: null,
-        activeStudentCount: { $sum: 1 },
+        _id: "$class",
+        studentCount: { $sum: 1 },
         monthlyEarnings: { $sum: { $ifNull: ["$monthlyFee", 0] } },
       },
     },
+    { $sort: { _id: 1 } },
   ]);
+
+  const groupedEarnings = {
+    classes8To10: { label: "Classes 8–10", studentCount: 0, monthlyEarnings: 0 },
+    classes6To7: { label: "Classes 6–7", studentCount: 0, monthlyEarnings: 0 },
+    ukgAndClasses1To5: { label: "UKG + Classes 1–5", studentCount: 0, monthlyEarnings: 0 },
+    otherClasses: { label: "Other classes", studentCount: 0, monthlyEarnings: 0 },
+  };
+  const classWise = classes.map((entry) => {
+    const className = String(entry._id || "Unspecified").trim() || "Unspecified";
+    const normalizedClass = className.toUpperCase();
+    const classNumber = Number(normalizedClass.match(/\d+/)?.[0]);
+    let group = "otherClasses";
+
+    if (normalizedClass.includes("UKG") || (classNumber >= 1 && classNumber <= 5)) {
+      group = "ukgAndClasses1To5";
+    } else if (classNumber >= 6 && classNumber <= 7) {
+      group = "classes6To7";
+    } else if (classNumber >= 8 && classNumber <= 10) {
+      group = "classes8To10";
+    }
+
+    groupedEarnings[group].studentCount += entry.studentCount;
+    groupedEarnings[group].monthlyEarnings += entry.monthlyEarnings;
+    return {
+      className,
+      studentCount: entry.studentCount,
+      monthlyEarnings: entry.monthlyEarnings,
+    };
+  });
 
   res.json({
     success: true,
     data: {
-      activeStudentCount: summary?.activeStudentCount || 0,
-      monthlyEarnings: summary?.monthlyEarnings || 0,
+      activeStudentCount: classes.reduce((total, entry) => total + entry.studentCount, 0),
+      monthlyEarnings: classes.reduce((total, entry) => total + entry.monthlyEarnings, 0),
+      groupedEarnings,
+      classWise,
     },
   });
 });
