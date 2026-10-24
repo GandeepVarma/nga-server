@@ -136,4 +136,94 @@ const getAttendancePercentage = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { total, present, percentage } });
 });
 
-module.exports = { markAttendance, getAttendance, getTodaySummary, getAttendancePercentage };
+// @desc    Students with attendance below the threshold for a selected period
+// @route   GET /api/attendance/low-attendance?period=month|quarter|year&year=&month=&quarter=
+// @access  Staff (Admin or Teacher)
+const getLowAttendanceStudents = asyncHandler(async (req, res) => {
+  const { period, year: yearValue, month: monthValue, quarter: quarterValue } = req.query;
+  const year = Number(yearValue);
+
+  if (!["month", "quarter", "year"].includes(period)) {
+    res.status(400);
+    throw new Error("period must be month, quarter, or year");
+  }
+  if (!Number.isInteger(year) || year < 1900 || year > 9999) {
+    res.status(400);
+    throw new Error("A valid year is required");
+  }
+
+  let startDate;
+  let endDate;
+  if (period === "month") {
+    const month = Number(monthValue);
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      res.status(400);
+      throw new Error("A valid month is required");
+    }
+    startDate = new Date(Date.UTC(year, month - 1, 1));
+    endDate = new Date(Date.UTC(year, month, 1));
+  } else if (period === "quarter") {
+    const quarter = Number(quarterValue);
+    if (!Number.isInteger(quarter) || quarter < 1 || quarter > 4) {
+      res.status(400);
+      throw new Error("A valid quarter is required");
+    }
+    const firstMonth = (quarter - 1) * 3;
+    startDate = new Date(Date.UTC(year, firstMonth, 1));
+    endDate = new Date(Date.UTC(year, firstMonth + 3, 1));
+  } else {
+    startDate = new Date(Date.UTC(year, 0, 1));
+    endDate = new Date(Date.UTC(year + 1, 0, 1));
+  }
+
+  const studentScope = { "student.academyId": requireAcademyId(req) };
+  if (req.user.role !== "admin") studentScope["student.assignedTeacher"] = req.user._id;
+
+  const students = await Attendance.aggregate([
+    {
+      $match: {
+        academyId: requireAcademyId(req),
+        date: { $gte: startDate, $lt: endDate },
+      },
+    },
+    {
+      $group: {
+        _id: "$student",
+        totalDays: { $sum: 1 },
+        presentDays: { $sum: { $cond: [{ $eq: ["$status", "Present"] }, 1, 0] } },
+      },
+    },
+    {
+      $lookup: {
+        from: Student.collection.name,
+        localField: "_id",
+        foreignField: "_id",
+        as: "student",
+      },
+    },
+    { $unwind: "$student" },
+    { $match: studentScope },
+    {
+      $addFields: {
+        attendancePercent: { $multiply: [{ $divide: ["$presentDays", "$totalDays"] }, 100] },
+      },
+    },
+    { $match: { attendancePercent: { $lt: 75 } } },
+    { $sort: { "student.class": 1, "student.name": 1 } },
+    {
+      $project: {
+        _id: "$student._id",
+        studentId: "$student.studentId",
+        name: "$student.name",
+        class: "$student.class",
+        presentDays: 1,
+        totalDays: 1,
+        attendancePercent: 1,
+      },
+    },
+  ]);
+
+  res.json({ success: true, count: students.length, data: students });
+});
+
+module.exports = { markAttendance, getAttendance, getTodaySummary, getAttendancePercentage, getLowAttendanceStudents };
