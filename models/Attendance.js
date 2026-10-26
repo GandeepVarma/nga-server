@@ -12,6 +12,15 @@ const attendanceSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    scheduledClass: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ScheduledClass",
+      index: true,
+    },
+    session: {
+      type: String,
+      enum: ["morning", "evening"],
+    },
     date: {
       type: Date,
       required: true,
@@ -29,9 +38,14 @@ const attendanceSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// One attendance record per student per day
-attendanceSchema.index({ student: 1, date: 1 }, { unique: true });
 attendanceSchema.index({ academyId: 1, student: 1, date: 1 });
 attendanceSchema.index({ academyId: 1, date: 1, student: 1 });
+attendanceSchema.index(
+  { scheduledClass: 1, student: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { scheduledClass: { $type: "objectId" } },
+  }
+);
 
 module.exports = mongoose.model("Attendance", attendanceSchema);

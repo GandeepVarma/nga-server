@@ -1,8 +1,6 @@
 const asyncHandler = require("express-async-handler");
 const Attendance = require("../models/Attendance");
 const Student = require("../models/Student");
-const whatsapp = require("../services/whatsappService");
-const Settings = require("../models/Settings");
 const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
 const allowedStudentIds = async (req) => {
@@ -17,52 +15,8 @@ const allowedStudentIds = async (req) => {
 // @body    { date, class, records: [{ studentId, status }] }
 // @access  Staff (Admin or Teacher)
 const markAttendance = asyncHandler(async (req, res) => {
-  const { date, class: className, records } = req.body;
-
-  if (!date || !Array.isArray(records) || records.length === 0) {
-    res.status(400);
-    throw new Error("date and records[] are required");
-  }
-
-  const recordsWithClasses = records.map((record) => ({
-    ...record,
-    class: record.class || className,
-  }));
-  if (recordsWithClasses.some((record) => !record.studentId || !record.class || !["Present", "Absent", "Leave"].includes(record.status))) {
-    res.status(400);
-    throw new Error("Each record requires a studentId, class and valid status");
-  }
-
-  if (req.user.role !== "admin") {
-    const allowedIds = await allowedStudentIds(req);
-    const invalid = recordsWithClasses.filter((r) => !allowedIds.includes(r.studentId.toString()));
-    if (invalid.length > 0) {
-      res.status(403);
-      throw new Error("Access denied: one or more students are not assigned to you");
-    }
-  }
-
-  const results = await Promise.all(recordsWithClasses.map(({ studentId, status, class: recordClass }) =>
-    Attendance.findOneAndUpdate(
-      academyFilter(req, { student: studentId, date: new Date(date) }),
-      { academyId: requireAcademyId(req), student: studentId, date: new Date(date), class: recordClass, status, markedBy: req.user._id },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    )
-  ));
-
-  // Fire WhatsApp absent alerts in the background — never blocks the
-  // response, and a failure here must never break attendance marking itself.
-  Settings.getSingleton(requireAcademyId(req))
-    .then(async (settings) => {
-      if (!settings.whatsapp.autoNotificationsEnabled || !settings.whatsapp.notificationsEnabled.attendanceAlert) return;
-      const absentIds = recordsWithClasses.filter((r) => r.status === "Absent").map((r) => r.studentId);
-      if (absentIds.length === 0) return;
-      const absentStudents = await Student.find({ academyId: requireAcademyId(req), _id: { $in: absentIds } });
-      await Promise.all(absentStudents.map((s) => whatsapp.sendAttendanceAlert({ student: s, date })));
-    })
-    .catch((err) => console.error("[whatsapp] attendance alert failed:", err.message));
-
-  res.status(201).json({ success: true, data: results });
+  res.status(400);
+  throw new Error("Attendance must be recorded from a scheduled class session");
 });
 
 // @desc    Get attendance records, scoped to the requester's own students
@@ -140,7 +94,7 @@ const getAttendancePercentage = asyncHandler(async (req, res) => {
 // @route   GET /api/attendance/low-attendance?period=month|quarter|year&year=&month=&quarter=
 // @access  Staff (Admin or Teacher)
 const getLowAttendanceStudents = asyncHandler(async (req, res) => {
-  const { period, year: yearValue, month: monthValue, quarter: quarterValue } = req.query;
+  const { period, year: yearValue, month: monthValue, quarter: quarterValue, session } = req.query;
   const year = Number(yearValue);
 
   if (!["month", "quarter", "year"].includes(period)) {
@@ -150,6 +104,10 @@ const getLowAttendanceStudents = asyncHandler(async (req, res) => {
   if (!Number.isInteger(year) || year < 1900 || year > 9999) {
     res.status(400);
     throw new Error("A valid year is required");
+  }
+  if (session && !["all", "morning", "evening"].includes(session)) {
+    res.status(400);
+    throw new Error("session must be all, morning, or evening");
   }
 
   let startDate;
@@ -179,18 +137,23 @@ const getLowAttendanceStudents = asyncHandler(async (req, res) => {
   const studentScope = { "student.academyId": requireAcademyId(req) };
   if (req.user.role !== "admin") studentScope["student.assignedTeacher"] = req.user._id;
 
+  const attendanceMatch = {
+    academyId: requireAcademyId(req),
+    date: { $gte: startDate, $lt: endDate },
+  };
+  if (session && session !== "all") attendanceMatch.session = session;
+
   const students = await Attendance.aggregate([
     {
-      $match: {
-        academyId: requireAcademyId(req),
-        date: { $gte: startDate, $lt: endDate },
-      },
+      $match: attendanceMatch,
     },
     {
       $group: {
         _id: "$student",
         totalDays: { $sum: 1 },
         presentDays: { $sum: { $cond: [{ $eq: ["$status", "Present"] }, 1, 0] } },
+        absentDays: { $sum: { $cond: [{ $eq: ["$status", "Absent"] }, 1, 0] } },
+        leaveDays: { $sum: { $cond: [{ $eq: ["$status", "Leave"] }, 1, 0] } },
       },
     },
     {
@@ -216,7 +179,10 @@ const getLowAttendanceStudents = asyncHandler(async (req, res) => {
         studentId: "$student.studentId",
         name: "$student.name",
         class: "$student.class",
+        batch: "$student.batch",
         presentDays: 1,
+        absentDays: 1,
+        leaveDays: 1,
         totalDays: 1,
         attendancePercent: 1,
       },
