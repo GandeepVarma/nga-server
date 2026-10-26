@@ -3,6 +3,7 @@ const Student = require("../models/Student");
 const Test = require("../models/Test");
 const Assignment = require("../models/Assignment");
 const Attendance = require("../models/Attendance");
+const ScheduledClass = require("../models/ScheduledClass");
 const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
 // @desc    Teacher's own dashboard: only their assigned students' data.
@@ -72,12 +73,20 @@ const getStudentDashboard = asyncHandler(async (req, res) => {
   const student = req.user;
 
   const Fee = require("../models/Fee");
-  const [attendanceRecords, upcomingTests, assignments, fees, recentTests] = await Promise.all([
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const [attendanceRecords, upcomingTests, assignments, fees, recentTests, upcomingClasses] = await Promise.all([
     Attendance.find(academyFilter(req, { student: student._id })),
     Test.find(academyFilter(req, { "marks.student": student._id, date: { $gte: new Date() } })).sort({ date: 1 }).limit(5),
     Assignment.find(academyFilter(req, { "assignedStudents.student": student._id })).sort({ submissionDate: 1 }),
     Fee.find(academyFilter(req, { student: student._id })).sort({ month: -1 }),
     Test.find(academyFilter(req, { "marks.student": student._id, date: { $lt: new Date() } })).sort({ date: -1 }).limit(10),
+    ScheduledClass.find({
+      academyId: requireAcademyId(req),
+      class: student.class,
+      batch: student.batch?.trim() ? student.batch.trim() : { $in: ["", null] },
+      date: { $gte: today },
+    }).sort({ date: 1, session: 1 }).limit(10).select("class batch session date"),
   ]);
 
   const totalDays = attendanceRecords.length;
@@ -111,6 +120,7 @@ const getStudentDashboard = asyncHandler(async (req, res) => {
     data: {
       welcome: { name: student.name, class: student.class, profilePhoto: student.profilePhoto },
       attendancePercentage,
+      upcomingClasses,
       upcomingTests,
       pendingAssignmentsCount: pendingAssignments.length,
       pendingAssignments,
