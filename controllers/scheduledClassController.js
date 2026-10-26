@@ -12,6 +12,16 @@ const HISTORY_ATTENDANCE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const isVisibleInAttendanceHistory = (lastMarkedAt, now = new Date()) =>
   !lastMarkedAt || lastMarkedAt.getTime() > now.getTime() - HISTORY_ATTENDANCE_RETENTION_MS;
 
+const sortUpcomingClassesByAttendance = (classes) =>
+  classes
+    .map((scheduledClass, index) => ({ scheduledClass, index }))
+    .sort((a, b) => {
+      const aMarked = Object.keys(a.scheduledClass.attendance || {}).length > 0;
+      const bMarked = Object.keys(b.scheduledClass.attendance || {}).length > 0;
+      return Number(aMarked) - Number(bMarked) || a.index - b.index;
+    })
+    .map(({ scheduledClass }) => scheduledClass);
+
 const getStudentQuery = (req, className, batch) => {
   const query = { academyId: requireAcademyId(req), class: className, status: "Active" };
   query.batch = batch ? batch : { $in: ["", null] };
@@ -169,13 +179,17 @@ const getScheduledClasses = asyncHandler(async (req, res) => {
   const classesToReturn = req.query.period === "history"
     ? visibleClasses.filter((item) => isVisibleInAttendanceHistory(lastMarkedAtByClass.get(item._id.toString())))
     : visibleClasses;
+  const classesWithAttendance = classesToReturn.map((item) => ({
+    ...item.toObject(),
+    attendance: summaries.get(item._id.toString()) || {},
+  }));
+  const sortedClasses = req.query.period === "upcoming"
+    ? sortUpcomingClassesByAttendance(classesWithAttendance)
+    : classesWithAttendance;
 
   res.json({
     success: true,
-    data: classesToReturn.map((item) => ({
-      ...item.toObject(),
-      attendance: summaries.get(item._id.toString()) || {},
-    })),
+    data: sortedClasses,
   });
 });
 
@@ -270,4 +284,5 @@ module.exports = {
   getScheduledClassRoster,
   saveScheduledAttendance,
   isVisibleInAttendanceHistory,
+  sortUpcomingClassesByAttendance,
 };

@@ -2,7 +2,10 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Attendance = require("../models/Attendance");
 const ScheduledClass = require("../models/ScheduledClass");
-const { isVisibleInAttendanceHistory } = require("../controllers/scheduledClassController");
+const {
+  isVisibleInAttendanceHistory,
+  sortUpcomingClassesByAttendance,
+} = require("../controllers/scheduledClassController");
 
 test("scheduled attendance is unique per student and scheduled class", () => {
   const indexes = Attendance.schema.indexes();
@@ -45,4 +48,18 @@ test("marked sessions remain in staff history for seven days, then disappear", (
   assert.equal(isVisibleInAttendanceHistory(new Date(now.getTime() - sevenDays + 1), now), true);
   assert.equal(isVisibleInAttendanceHistory(new Date(now.getTime() - sevenDays), now), false);
   assert.equal(isVisibleInAttendanceHistory(new Date(now.getTime() - sevenDays - 1), now), false);
+});
+
+test("upcoming sessions with attendance are ordered after unmarked sessions", () => {
+  const sessions = [
+    { _id: "unmarked-first", date: "2026-10-26", attendance: {} },
+    { _id: "marked-first", date: "2026-10-27", attendance: { Present: 2 } },
+    { _id: "unmarked-later", date: "2026-10-28", attendance: {} },
+    { _id: "marked-second", date: "2026-10-29", attendance: { Absent: 1 } },
+  ];
+
+  assert.deepEqual(
+    sortUpcomingClassesByAttendance(sessions).map((scheduledClass) => scheduledClass._id),
+    ["unmarked-first", "unmarked-later", "marked-first", "marked-second"]
+  );
 });
