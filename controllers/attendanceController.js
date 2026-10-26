@@ -20,14 +20,28 @@ const markAttendance = asyncHandler(async (req, res) => {
 });
 
 // @desc    Get attendance records, scoped to the requester's own students
-// @route   GET /api/attendance?class=&date=&student=
+// @route   GET /api/attendance?class=&date=&student=&status=&session=
 // @access  Staff (Admin or Teacher)
 const getAttendance = asyncHandler(async (req, res) => {
-  const { class: className, date, student } = req.query;
+  const { class: className, date, student, status, session } = req.query;
   const query = { academyId: requireAcademyId(req) };
   if (className) query.class = className;
   if (date) query.date = new Date(date);
   if (student) query.student = student;
+  if (status) {
+    if (!["Present", "Absent", "Leave"].includes(status)) {
+      res.status(400);
+      throw new Error("status must be Present, Absent, or Leave");
+    }
+    query.status = status;
+  }
+  if (session) {
+    if (!["morning", "evening"].includes(session)) {
+      res.status(400);
+      throw new Error("session must be morning or evening");
+    }
+    query.session = session;
+  }
 
   if (req.user.role !== "admin") {
     const allowedIds = await allowedStudentIds(req);
@@ -40,7 +54,7 @@ const getAttendance = asyncHandler(async (req, res) => {
     }
   }
 
-  const records = await Attendance.find(query).populate("student", "name studentId").sort({ date: -1 });
+  const records = await Attendance.find(query).populate("student", "name studentId batch").sort({ date: -1 });
   res.json({ success: true, count: records.length, data: records });
 });
 
