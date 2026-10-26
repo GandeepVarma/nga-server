@@ -7,6 +7,11 @@ const Settings = require("../models/Settings");
 const whatsapp = require("../services/whatsappService");
 const { requireAcademyId } = require("../utils/tenant");
 
+const HISTORY_ATTENDANCE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+const isVisibleInAttendanceHistory = (lastMarkedAt, now = new Date()) =>
+  !lastMarkedAt || lastMarkedAt.getTime() > now.getTime() - HISTORY_ATTENDANCE_RETENTION_MS;
+
 const getStudentQuery = (req, className, batch) => {
   const query = { academyId: requireAcademyId(req), class: className, status: "Active" };
   query.batch = batch ? batch : { $in: ["", null] };
@@ -140,18 +145,34 @@ const getScheduledClasses = asyncHandler(async (req, res) => {
   const attendance = ids.length
     ? await Attendance.aggregate([
         { $match: { academyId, scheduledClass: { $in: ids } } },
-        { $group: { _id: { scheduledClass: "$scheduledClass", status: "$status" }, count: { $sum: 1 } } },
+        {
+          $group: {
+            _id: { scheduledClass: "$scheduledClass", status: "$status" },
+            count: { $sum: 1 },
+            lastMarkedAt: { $max: "$updatedAt" },
+          },
+        },
       ])
     : [];
   const summaries = new Map();
-  attendance.forEach(({ _id, count }) => {
-    if (!summaries.has(_id.scheduledClass.toString())) summaries.set(_id.scheduledClass.toString(), {});
-    summaries.get(_id.scheduledClass.toString())[_id.status] = count;
+  const lastMarkedAtByClass = new Map();
+  attendance.forEach(({ _id, count, lastMarkedAt }) => {
+    const id = _id.scheduledClass.toString();
+    const summary = summaries.get(id) || {};
+    summary[_id.status] = count;
+    summaries.set(id, summary);
+    const currentLastMarkedAt = lastMarkedAtByClass.get(id);
+    if (!currentLastMarkedAt || lastMarkedAt > currentLastMarkedAt) {
+      lastMarkedAtByClass.set(id, lastMarkedAt);
+    }
   });
+  const classesToReturn = req.query.period === "history"
+    ? visibleClasses.filter((item) => isVisibleInAttendanceHistory(lastMarkedAtByClass.get(item._id.toString())))
+    : visibleClasses;
 
   res.json({
     success: true,
-    data: visibleClasses.map((item) => ({
+    data: classesToReturn.map((item) => ({
       ...item.toObject(),
       attendance: summaries.get(item._id.toString()) || {},
     })),
@@ -248,4 +269,5 @@ module.exports = {
   getScheduledClasses,
   getScheduledClassRoster,
   saveScheduledAttendance,
+  isVisibleInAttendanceHistory,
 };

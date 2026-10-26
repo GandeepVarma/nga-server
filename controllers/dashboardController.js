@@ -66,7 +66,7 @@ const getTeacherDashboard = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc    Student dashboard data (unchanged — students only ever see themselves)
+// @desc    Student dashboard data, including the student's recent session attendance
 // @route   GET /api/dashboard/student
 // @access  Student
 const getStudentDashboard = asyncHandler(async (req, res) => {
@@ -75,19 +75,59 @@ const getStudentDashboard = asyncHandler(async (req, res) => {
   const Fee = require("../models/Fee");
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
+  const attendanceExpiry = new Date(Date.now() - 48 * 60 * 60 * 1000);
   const [attendanceRecords, upcomingTests, assignments, fees, recentTests, upcomingClasses] = await Promise.all([
     Attendance.find(academyFilter(req, { student: student._id })),
     Test.find(academyFilter(req, { "marks.student": student._id, date: { $gte: new Date() } })).sort({ date: 1 }).limit(5),
     Assignment.find(academyFilter(req, { "assignedStudents.student": student._id })).sort({ submissionDate: 1 }),
     Fee.find(academyFilter(req, { student: student._id })).sort({ month: -1 }),
     Test.find(academyFilter(req, { "marks.student": student._id, date: { $lt: new Date() } })).sort({ date: -1 }).limit(10),
-    ScheduledClass.find({
-      academyId: requireAcademyId(req),
-      class: student.class,
-      batch: student.batch?.trim() ? student.batch.trim() : { $in: ["", null] },
-      date: { $gte: today },
-    }).sort({ date: 1, session: 1 }).limit(10).select("class batch session date"),
+    (async () => {
+      const recentScheduledClassIds = await Attendance.distinct("scheduledClass", {
+        ...academyFilter(req, { student: student._id }),
+        scheduledClass: { $exists: true },
+        updatedAt: { $gt: attendanceExpiry },
+      });
+      const scheduleFilter = {
+        academyId: requireAcademyId(req),
+        class: student.class,
+        batch: student.batch?.trim() ? student.batch.trim() : { $in: ["", null] },
+      };
+      const [futureClasses, recentlyMarkedClasses] = await Promise.all([
+        ScheduledClass.find({ ...scheduleFilter, date: { $gte: today } })
+          .sort({ date: 1, session: 1 }).limit(10).select("class batch session date"),
+        recentScheduledClassIds.length
+          ? ScheduledClass.find({ ...scheduleFilter, _id: { $in: recentScheduledClassIds } })
+              .sort({ date: 1, session: 1 }).select("class batch session date")
+          : [],
+      ]);
+      return [...new Map(
+        [...futureClasses, ...recentlyMarkedClasses].map((scheduledClass) => [
+          scheduledClass._id.toString(),
+          scheduledClass,
+        ])
+      ).values()].sort((a, b) => a.date - b.date || a.session.localeCompare(b.session));
+    })(),
   ]);
+
+  const attendanceByScheduledClass = new Map(
+    attendanceRecords
+      .filter((record) => record.scheduledClass)
+      .map((record) => [record.scheduledClass.toString(), record])
+  );
+  const classesWithAttendance = upcomingClasses
+    .map((scheduledClass) => {
+      const attendance = attendanceByScheduledClass.get(scheduledClass._id.toString());
+      return {
+        ...scheduledClass.toObject(),
+        attendanceStatus: attendance?.status || null,
+      };
+    })
+    .filter((scheduledClass) => {
+      if (scheduledClass.date >= today) return true;
+      const attendance = attendanceByScheduledClass.get(scheduledClass._id.toString());
+      return attendance?.updatedAt && attendance.updatedAt > attendanceExpiry;
+    });
 
   const totalDays = attendanceRecords.length;
   const presentDays = attendanceRecords.filter((a) => a.status === "Present").length;
@@ -120,7 +160,7 @@ const getStudentDashboard = asyncHandler(async (req, res) => {
     data: {
       welcome: { name: student.name, class: student.class, profilePhoto: student.profilePhoto },
       attendancePercentage,
-      upcomingClasses,
+      upcomingClasses: classesWithAttendance,
       upcomingTests,
       pendingAssignmentsCount: pendingAssignments.length,
       pendingAssignments,

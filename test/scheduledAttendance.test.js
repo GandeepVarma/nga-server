@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Attendance = require("../models/Attendance");
 const ScheduledClass = require("../models/ScheduledClass");
+const { isVisibleInAttendanceHistory } = require("../controllers/scheduledClassController");
 
 test("scheduled attendance is unique per student and scheduled class", () => {
   const indexes = Attendance.schema.indexes();
@@ -34,4 +35,14 @@ test("scheduled class identity includes academy, class, batch, session, and date
   );
 
   assert.ok(scheduleIndex);
+});
+
+test("marked sessions remain in staff history for seven days, then disappear", () => {
+  const now = new Date("2026-10-26T00:00:00.000Z");
+  const sevenDays = 7 * 24 * 60 * 60 * 1000;
+
+  assert.equal(isVisibleInAttendanceHistory(null, now), true);
+  assert.equal(isVisibleInAttendanceHistory(new Date(now.getTime() - sevenDays + 1), now), true);
+  assert.equal(isVisibleInAttendanceHistory(new Date(now.getTime() - sevenDays), now), false);
+  assert.equal(isVisibleInAttendanceHistory(new Date(now.getTime() - sevenDays - 1), now), false);
 });
