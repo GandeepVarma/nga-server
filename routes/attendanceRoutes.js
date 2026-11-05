@@ -12,6 +12,7 @@ const {
   getScheduledClasses,
   getScheduledClassRoster,
   saveScheduledAttendance,
+  deleteScheduledClass,
 } = require("../controllers/scheduledClassController");
 const { protect, teacherOnly } = require("../middleware/auth");
 const { requireFeature } = require("../middleware/featureAccess");
@@ -24,6 +25,7 @@ router.post("/sessions", protect, teacherOnly, requireFeature("attendance"), cre
 router.get("/sessions", protect, teacherOnly, requireFeature("attendance"), getScheduledClasses);
 router.get("/sessions/:id", protect, teacherOnly, requireFeature("attendance"), getScheduledClassRoster);
 router.put("/sessions/:id/attendance", protect, teacherOnly, requireFeature("attendance"), saveScheduledAttendance);
+router.delete("/sessions/:id", protect, teacherOnly, requireFeature("attendance"), deleteScheduledClass);
 router.get("/", protect, teacherOnly, requireFeature("attendance"), getAttendance);
 
 module.exports = router;

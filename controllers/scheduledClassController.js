@@ -278,11 +278,48 @@ const saveScheduledAttendance = asyncHandler(async (req, res) => {
   res.json({ success: true, data: attendanceRecords });
 });
 
+const deleteScheduledClass = asyncHandler(async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    res.status(400);
+    throw new Error("Invalid scheduled class ID");
+  }
+
+  const academyId = requireAcademyId(req);
+  const scheduledClass = await ScheduledClass.findOne({ _id: req.params.id, academyId });
+  if (!scheduledClass) {
+    res.status(404);
+    throw new Error("Scheduled class not found");
+  }
+
+  if (req.user.role !== "admin") {
+    const assignedStudents = await Student.exists(
+      getStudentQuery(req, scheduledClass.class, scheduledClass.batch)
+    );
+    if (!assignedStudents) {
+      res.status(403);
+      throw new Error("Access denied: this class is not assigned to you");
+    }
+  }
+
+  const deletedAttendance = await Attendance.deleteMany({
+    academyId,
+    scheduledClass: scheduledClass._id,
+  });
+  await ScheduledClass.deleteOne({ _id: scheduledClass._id, academyId });
+
+  res.json({
+    success: true,
+    message: "Scheduled class deleted",
+    deletedAttendanceCount: deletedAttendance.deletedCount,
+  });
+});
+
 module.exports = {
   createScheduledClass,
   getScheduledClasses,
   getScheduledClassRoster,
   saveScheduledAttendance,
+  deleteScheduledClass,
   isVisibleInAttendanceHistory,
   sortUpcomingClassesByAttendance,
 };
