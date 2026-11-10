@@ -22,6 +22,11 @@ const sortUpcomingClassesByAttendance = (classes) =>
     })
     .map(({ scheduledClass }) => scheduledClass);
 
+const getUnscheduledClassBatches = (classBatches, existing) => {
+  const existingPairs = new Set(existing.map((item) => `${item.class}\u0000${item.batch}`));
+  return classBatches.filter((pair) => !existingPairs.has(`${pair.class}\u0000${pair.batch}`));
+};
+
 const getStudentQuery = (req, className, batch) => {
   const query = { academyId: requireAcademyId(req), class: className, status: "Active" };
   query.batch = batch ? batch : { $in: ["", null] };
@@ -59,17 +64,9 @@ const validateDate = (value) => {
   return date;
 };
 
-const localDateString = (date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
 const createScheduledClass = asyncHandler(async (req, res) => {
   const { class: className, batch, session, allClasses, allBatches } = req.body;
   const date = validateDate(req.body.date);
-  const today = localDateString(new Date());
 
   if (allClasses !== true && (typeof className !== "string" || !className.trim())) {
     res.status(400);
@@ -82,10 +79,6 @@ const createScheduledClass = asyncHandler(async (req, res) => {
   if (!["morning", "evening"].includes(session) || !date) {
     res.status(400);
     throw new Error("A batch, valid session, and valid date are required");
-  }
-  if (req.body.date < today) {
-    res.status(400);
-    throw new Error("Classes cannot be scheduled for a past date");
   }
 
   const studentQuery = { academyId: requireAcademyId(req), status: "Active" };
@@ -110,27 +103,31 @@ const createScheduledClass = asyncHandler(async (req, res) => {
   }
 
   const classNames = [...new Set(classBatches.map((pair) => pair.class))];
+  const nextDate = new Date(date.getTime() + 24 * 60 * 60 * 1000);
   const existing = await ScheduledClass.find({
     academyId: requireAcademyId(req),
     class: { $in: classNames },
-    date,
+    date: { $gte: date, $lt: nextDate },
     session,
   }).select("class batch");
-  const existingPairs = new Set(existing.map((item) => `${item.class}\u0000${item.batch}`));
-  const conflicts = classBatches.filter((pair) => existingPairs.has(`${pair.class}\u0000${pair.batch}`));
-  if (conflicts.length) {
+  const newClassBatches = getUnscheduledClassBatches(classBatches, existing);
+  if (!newClassBatches.length) {
     res.status(409);
-    throw new Error(`Already scheduled for ${conflicts.map((pair) => `${pair.class} · ${pair.batch || "No batch"}`).join(", ")}`);
+    throw new Error(`Already scheduled for ${req.body.date} (${session}) for all selected classes and batches`);
   }
 
-  const scheduledClasses = await ScheduledClass.insertMany(classBatches.map((pair) => ({
+  const scheduledClasses = await ScheduledClass.insertMany(newClassBatches.map((pair) => ({
     academyId: requireAcademyId(req),
     ...pair,
     session,
     date,
     createdBy: req.user._id,
   })));
-  res.status(201).json({ success: true, data: scheduledClasses });
+  res.status(201).json({
+    success: true,
+    data: scheduledClasses,
+    skippedExistingCount: classBatches.length - newClassBatches.length,
+  });
 });
 
 const getScheduledClasses = asyncHandler(async (req, res) => {
@@ -322,4 +319,5 @@ module.exports = {
   deleteScheduledClass,
   isVisibleInAttendanceHistory,
   sortUpcomingClassesByAttendance,
+  getUnscheduledClassBatches,
 };

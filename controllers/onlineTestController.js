@@ -13,6 +13,26 @@ const assignmentFilter = (req, test = {}) => ({
   batch: req.user.batch,
 });
 
+const buildStudentProgress = (students, submissions) => {
+  const submissionByStudent = new Map(
+    submissions
+      .filter((submission) => submission.student?._id)
+      .map((submission) => [submission.student._id.toString(), submission])
+  );
+
+  return students.map((student) => {
+    const submission = submissionByStudent.get(student._id.toString());
+    return {
+      _id: student._id,
+      name: student.name,
+      studentId: student.studentId,
+      class: student.class,
+      status: submission?.submittedAt ? "Completed" : submission ? "In Progress" : "Not Started",
+      percentage: submission?.submittedAt ? submission.percentage : null,
+    };
+  });
+};
+
 const assertAssignmentExists = async (req, className, batch) => {
   const filter = { academyId: requireAcademyId(req), class: className, batch };
   if (req.user.role !== "admin") filter.assignedTeacher = req.user._id;
@@ -261,10 +281,16 @@ const getAnalytics = asyncHandler(async (req, res) => {
     throw err;
   });
 
-  const [assignedCount, submissions] = await Promise.all([
-    Student.countDocuments({ academyId: requireAcademyId(req), class: test.class, batch: test.batch, status: "Active" }),
-    Submission.find({ academyId: requireAcademyId(req), test: test._id, submittedAt: { $ne: null } }).populate("student", "name studentId"),
+  const [assignedStudents, allSubmissions] = await Promise.all([
+    Student.find({ academyId: requireAcademyId(req), class: test.class, batch: test.batch, status: "Active" })
+      .select("name studentId class")
+      .sort({ name: 1 }),
+    Submission.find({ academyId: requireAcademyId(req), test: test._id }).populate("student", "name studentId"),
   ]);
+
+  const submissions = allSubmissions.filter((submission) => submission.submittedAt);
+  const assignedCount = assignedStudents.length;
+  const studentProgress = buildStudentProgress(assignedStudents, allSubmissions);
 
   const attempted = submissions.length;
   const notAttempted = Math.max(assignedCount - attempted, 0);
@@ -306,6 +332,7 @@ const getAnalytics = asyncHandler(async (req, res) => {
     data: {
       assignedCount, attempted, notAttempted, average, highest, lowest,
       passPercentageActual,
+      studentProgress,
       scoreDistribution: { labels: ["0-20", "21-40", "41-60", "61-80", "81-100"], counts: buckets },
       questionAccuracy,
       topPerformers,
@@ -367,4 +394,5 @@ const exportSubmissionsCSV = asyncHandler(async (req, res) => {
 module.exports = {
   createTest, getTests, getTestById, updateTest, setPublishStatus,
   duplicateTest, deleteTest, getAnalytics, getSubmissions, exportSubmissionsCSV, getAssignmentOptions,
+  buildStudentProgress,
 };

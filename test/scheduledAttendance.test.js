@@ -5,6 +5,7 @@ const ScheduledClass = require("../models/ScheduledClass");
 const {
   isVisibleInAttendanceHistory,
   sortUpcomingClassesByAttendance,
+  getUnscheduledClassBatches,
 } = require("../controllers/scheduledClassController");
 
 test("scheduled attendance is unique per student and scheduled class", () => {
@@ -38,6 +39,25 @@ test("scheduled class identity includes academy, class, batch, session, and date
   );
 
   assert.ok(scheduleIndex);
+});
+
+test("bulk scheduling skips existing batches without blocking missing batches", () => {
+  const classBatches = [
+    { class: "Class 1", batch: "Batch A" },
+    { class: "Class 1", batch: "Batch B" },
+  ];
+
+  assert.deepEqual(
+    getUnscheduledClassBatches(classBatches, [{ class: "Class 1", batch: "Batch A" }]),
+    [{ class: "Class 1", batch: "Batch B" }]
+  );
+  assert.deepEqual(
+    getUnscheduledClassBatches(classBatches, [
+      { class: "Class 1", batch: "Batch A" },
+      { class: "Class 1", batch: "Batch B" },
+    ]),
+    []
+  );
 });
 
 test("marked sessions remain in staff history for seven days, then disappear", () => {
