@@ -364,6 +364,82 @@ const getSubmissions = asyncHandler(async (req, res) => {
   res.json({ success: true, count: submissions.length, total, page: Number(page), data: submissions });
 });
 
+const getSubmissionReview = asyncHandler(async (req, res) => {
+  const test = await findOwnedTest(req, req.params.id);
+  const submission = await Submission.findOne({
+    academyId: requireAcademyId(req),
+    test: test._id,
+    student: req.params.studentId,
+    submittedAt: { $ne: null },
+  }).populate("student", "name studentId class");
+
+  if (!submission) {
+    res.status(404);
+    throw new Error("Completed submission not found");
+  }
+
+  const review = test.questions.map((question) => {
+    const answer = submission.answers.find((item) => item.questionId.toString() === question._id.toString());
+    return {
+      questionText: question.questionText,
+      options: question.options,
+      correctOption: question.correctOption,
+      selectedOption: answer?.selectedOption ?? null,
+      explanation: question.explanation,
+      marks: question.marks,
+    };
+  });
+
+  res.json({
+    success: true,
+    data: {
+      testTitle: test.title,
+      student: submission.student,
+      score: submission.score,
+      totalMarks: test.totalMarks,
+      percentage: submission.percentage,
+      passed: submission.percentage >= test.passPercentage,
+      submittedAt: submission.submittedAt,
+      review,
+    },
+  });
+});
+
+const getOnlineTestResults = asyncHandler(async (req, res) => {
+  const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 50, 1), 100);
+  const filter = { academyId: requireAcademyId(req), submittedAt: { $ne: null } };
+
+  const [submissions, total] = await Promise.all([
+    Submission.find(filter)
+      .populate("student", "name studentId class")
+      .populate("test", "title subject class batch questions passPercentage")
+      .sort({ submittedAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit),
+    Submission.countDocuments(filter),
+  ]);
+
+  const results = submissions.map((submission) => ({
+    _id: submission._id,
+    student: submission.student,
+    test: submission.test ? {
+      _id: submission.test._id,
+      title: submission.test.title,
+      subject: submission.test.subject,
+      class: submission.test.class,
+      batch: submission.test.batch,
+      totalMarks: submission.test.questions.reduce((totalMarks, question) => totalMarks + question.marks, 0),
+    } : null,
+    score: submission.score,
+    percentage: submission.percentage,
+    submittedAt: submission.submittedAt,
+    autoSubmitted: submission.autoSubmitted,
+  }));
+
+  res.json({ success: true, data: results, total, page, limit });
+});
+
 // @desc    Export a test's submissions as CSV
 // @route   GET /api/online-tests/:id/export
 // @access  Staff (Admin or owning Teacher)
@@ -393,6 +469,7 @@ const exportSubmissionsCSV = asyncHandler(async (req, res) => {
 
 module.exports = {
   createTest, getTests, getTestById, updateTest, setPublishStatus,
-  duplicateTest, deleteTest, getAnalytics, getSubmissions, exportSubmissionsCSV, getAssignmentOptions,
+  duplicateTest, deleteTest, getAnalytics, getSubmissions, getSubmissionReview, getOnlineTestResults,
+  exportSubmissionsCSV, getAssignmentOptions,
   buildStudentProgress,
 };

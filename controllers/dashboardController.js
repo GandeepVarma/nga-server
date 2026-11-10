@@ -1,10 +1,39 @@
 const asyncHandler = require("express-async-handler");
 const Student = require("../models/Student");
 const Test = require("../models/Test");
+const OnlineTestSubmission = require("../models/Submission");
 const Assignment = require("../models/Assignment");
 const Attendance = require("../models/Attendance");
 const ScheduledClass = require("../models/ScheduledClass");
 const { academyFilter, requireAcademyId } = require("../utils/tenant");
+
+const buildProgressGraph = (recentTests, onlineTestSubmissions, studentId) => {
+  const legacyProgress = recentTests.map((test) => {
+    const entry = test.marks.find((mark) => mark.student.toString() === studentId.toString());
+    return {
+      testName: test.testName,
+      subject: test.subject,
+      date: test.date,
+      percentage:
+        entry && entry.marksObtained !== null
+          ? Number(((entry.marksObtained / test.maxMarks) * 100).toFixed(1))
+          : null,
+    };
+  });
+  const onlineProgress = onlineTestSubmissions
+    .filter((submission) => submission.test && submission.percentage !== null)
+    .map((submission) => ({
+      testName: submission.test.title,
+      subject: submission.test.subject,
+      date: submission.submittedAt,
+      percentage: submission.percentage,
+    }));
+
+  return [...legacyProgress, ...onlineProgress]
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, 10)
+    .reverse();
+};
 
 // @desc    Teacher's own dashboard: only their assigned students' data.
 //          Deliberately contains NO fee/revenue information — per RBAC
@@ -76,12 +105,16 @@ const getStudentDashboard = asyncHandler(async (req, res) => {
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   const attendanceExpiry = new Date(Date.now() - 48 * 60 * 60 * 1000);
-  const [attendanceRecords, upcomingTests, assignments, fees, recentTests, upcomingClasses] = await Promise.all([
+  const [attendanceRecords, upcomingTests, assignments, fees, recentTests, onlineTestSubmissions, upcomingClasses] = await Promise.all([
     Attendance.find(academyFilter(req, { student: student._id })),
     Test.find(academyFilter(req, { "marks.student": student._id, date: { $gte: new Date() } })).sort({ date: 1 }).limit(5),
     Assignment.find(academyFilter(req, { "assignedStudents.student": student._id })).sort({ submissionDate: 1 }),
     Fee.find(academyFilter(req, { student: student._id })).sort({ month: -1 }),
     Test.find(academyFilter(req, { "marks.student": student._id, date: { $lt: new Date() } })).sort({ date: -1 }).limit(10),
+    OnlineTestSubmission.find(academyFilter(req, { student: student._id, submittedAt: { $ne: null } }))
+      .populate("test", "title subject")
+      .sort({ submittedAt: -1 })
+      .limit(10),
     (async () => {
       const recentScheduledClassIds = await Attendance.distinct("scheduledClass", {
         ...academyFilter(req, { student: student._id }),
@@ -140,20 +173,7 @@ const getStudentDashboard = asyncHandler(async (req, res) => {
 
   const currentFee = fees[0] || null;
 
-  const progressGraph = recentTests
-    .map((t) => {
-      const entry = t.marks.find((m) => m.student.toString() === student._id.toString());
-      return {
-        testName: t.testName,
-        subject: t.subject,
-        date: t.date,
-        percentage:
-          entry && entry.marksObtained !== null
-            ? Number(((entry.marksObtained / t.maxMarks) * 100).toFixed(1))
-            : null,
-      };
-    })
-    .reverse();
+  const progressGraph = buildProgressGraph(recentTests, onlineTestSubmissions, student._id);
 
   res.json({
     success: true,
@@ -170,4 +190,4 @@ const getStudentDashboard = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { getTeacherDashboard, getStudentDashboard };
+module.exports = { getTeacherDashboard, getStudentDashboard, buildProgressGraph };

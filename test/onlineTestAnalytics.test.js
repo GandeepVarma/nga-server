@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { buildStudentProgress } = require("../controllers/onlineTestController");
+const { combineTeacherScoreAggregates } = require("../controllers/adminController");
 
 test("analytics lists student names and completed, in-progress, and not-started statuses", () => {
   const students = [
@@ -21,4 +22,17 @@ test("analytics lists student names and completed, in-progress, and not-started 
       { name: "Katherine", status: "Not Started" },
     ]
   );
+});
+
+test("teacher scores combine regular and online test results using graded result counts", () => {
+  const scores = combineTeacherScoreAggregates(
+    [{ _id: "teacher-1", averageScorePercent: 75, gradedMarks: 2, tests: ["test-1", "test-2"] }],
+    [{ _id: "teacher-1", averageScorePercent: 95, gradedMarks: 1, tests: ["test-2", "online-1"] }]
+  );
+
+  assert.deepEqual(scores.get("teacher-1"), {
+    averageScorePercent: (75 * 2 + 95) / 3,
+    gradedMarks: 3,
+    tests: ["test-1", "test-2", "online-1"],
+  });
 });

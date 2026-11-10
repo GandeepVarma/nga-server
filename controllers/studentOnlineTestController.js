@@ -13,6 +13,18 @@ const studentAssignmentFilter = (req, extra = {}) => {
   };
 };
 
+const buildAnswerReview = (test, submission) => test.questions.map((question) => {
+  const answer = submission.answers.find((item) => item.questionId.toString() === question._id.toString());
+  return {
+    questionText: question.questionText,
+    options: question.options,
+    correctOption: question.correctOption,
+    selectedOption: answer ? answer.selectedOption : null,
+    explanation: question.explanation,
+    marks: question.marks,
+  };
+});
+
 // @desc    List tests available to the logged-in student: published, in their
 //          class, within the availability window (or recently closed so they
 //          can still see past results). Includes their own attempt status.
@@ -237,7 +249,7 @@ const submitTest = asyncHandler(async (req, res) => {
   res.json({ success: true, data: submission });
 });
 
-// @desc    Get the result for a completed attempt (respects showResults/allowReview)
+// @desc    Get the result and answer review for a completed attempt
 // @route   GET /api/online-tests/student/:id/result
 // @access  Student
 const getResult = asyncHandler(async (req, res) => {
@@ -260,20 +272,7 @@ const getResult = asyncHandler(async (req, res) => {
     throw new Error("Results for this test are not available yet");
   }
 
-  let review = null;
-  if (test.allowReview) {
-    review = test.questions.map((q) => {
-      const ans = submission.answers.find((a) => a.questionId.toString() === q._id.toString());
-      return {
-        questionText: q.questionText,
-        options: q.options,
-        correctOption: q.correctOption,
-        selectedOption: ans ? ans.selectedOption : null,
-        explanation: q.explanation,
-        marks: q.marks,
-      };
-    });
-  }
+  const review = buildAnswerReview(test, submission);
 
   res.json({
     success: true,
@@ -293,4 +292,4 @@ const getResult = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { getMyTests, getTestForStudent, startTest, saveProgress, submitTest, getResult };
+module.exports = { getMyTests, getTestForStudent, startTest, saveProgress, submitTest, getResult, buildAnswerReview };

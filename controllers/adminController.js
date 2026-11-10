@@ -2,10 +2,36 @@ const asyncHandler = require("express-async-handler");
 const Teacher = require("../models/Teacher");
 const Student = require("../models/Student");
 const Test = require("../models/Test");
+const Submission = require("../models/Submission");
 const Assignment = require("../models/Assignment");
 const Fee = require("../models/Fee");
 const Attendance = require("../models/Attendance");
 const { academyFilter, requireAcademyId } = require("../utils/tenant");
+
+const combineTeacherScoreAggregates = (regularScores = [], onlineScores = []) => {
+  const combined = new Map();
+  [...regularScores, ...onlineScores].forEach((score) => {
+    if (!score._id) return;
+    const teacherId = String(score._id);
+    const current = combined.get(teacherId) || { weightedScore: 0, gradedMarks: 0, tests: new Set() };
+    const gradedMarks = score.gradedMarks || 0;
+    current.weightedScore += (score.averageScorePercent || 0) * gradedMarks;
+    current.gradedMarks += gradedMarks;
+    (score.tests || []).forEach((testId) => current.tests.add(String(testId)));
+    combined.set(teacherId, current);
+  });
+
+  return new Map(
+    [...combined].map(([teacherId, score]) => [
+      teacherId,
+      {
+        averageScorePercent: score.gradedMarks ? score.weightedScore / score.gradedMarks : null,
+        gradedMarks: score.gradedMarks,
+        tests: [...score.tests],
+      },
+    ])
+  );
+};
 
 // ---------- Teacher management (Admin only) ----------
 
@@ -324,7 +350,7 @@ const getAdminDashboard = asyncHandler(async (req, res) => {
     ? Number((((current - previous) / previous) * 100).toFixed(1))
     : null;
 
-  const [studentSummaryResult, teachers, attendanceResult, feeResult, testResult, recentTests, recentAssignments, recentAttendance, recentPayments] = await Promise.all([
+  const [studentSummaryResult, teachers, attendanceResult, feeResult, testResult, onlineTeacherScores, recentTests, recentAssignments, recentAttendance, recentPayments] = await Promise.all([
     Student.aggregate([
       { $match: { academyId } },
       {
@@ -552,6 +578,30 @@ const getAdminDashboard = asyncHandler(async (req, res) => {
         },
       },
     ]),
+    Submission.aggregate([
+      { $match: { academyId, submittedAt: { $ne: null, $lte: endOfDay }, percentage: { $type: "number" } } },
+      {
+        $lookup: {
+          from: Student.collection.name,
+          let: { studentId: "$student" },
+          pipeline: [
+            { $match: { $expr: { $and: [{ $eq: ["$_id", "$$studentId"] }, { $eq: ["$academyId", academyId] }] } } },
+            { $project: { assignedTeacher: 1 } },
+          ],
+          as: "studentRecord",
+        },
+      },
+      { $unwind: "$studentRecord" },
+      { $match: { "studentRecord.assignedTeacher": { $ne: null } } },
+      {
+        $group: {
+          _id: "$studentRecord.assignedTeacher",
+          averageScorePercent: { $avg: "$percentage" },
+          gradedMarks: { $sum: 1 },
+          tests: { $addToSet: "$test" },
+        },
+      },
+    ]),
     Test.find({ academyId, date: { $lte: endOfDay } }).sort({ date: -1 }).limit(12).select("testName subject class maxMarks date marks createdAt").lean(),
     Assignment.find({ academyId }).sort({ createdAt: -1 }).limit(5).select("title class createdAt").lean(),
     Attendance.find({ academyId }).sort({ updatedAt: -1 }).limit(5).select("student status date updatedAt").populate("student", "name").lean(),
@@ -574,7 +624,7 @@ const getAdminDashboard = asyncHandler(async (req, res) => {
   const overallScores = testSummary.scores?.[0] || {};
   const scoreByMonth = new Map((testSummary.monthlyScores || []).map((month) => [month._id, month]));
   const scoreByClass = new Map((testSummary.classes || []).map((entry) => [entry._id, entry]));
-  const scoreByTeacher = new Map((testSummary.teachers || []).map((entry) => [String(entry._id), entry]));
+  const scoreByTeacher = combineTeacherScoreAggregates(testSummary.teachers, onlineTeacherScores);
   const attendanceByClass = new Map((attendanceSummary.classes || []).map((entry) => [entry._id, entry]));
   const attendanceByTeacher = new Map((attendanceSummary.byTeacher || []).map((entry) => [String(entry._id), entry]));
   const feesByClass = new Map((feeSummary.classes || []).map((entry) => [entry._id, entry]));
@@ -629,6 +679,7 @@ const getAdminDashboard = asyncHandler(async (req, res) => {
       studentCount: teacherCounts.get(teacherId) || 0,
       averageScorePercent: scores ? Number(scores.averageScorePercent.toFixed(1)) : null,
       testsCount: scores?.tests?.length || 0,
+      gradedMarks: scores?.gradedMarks || 0,
       attendancePercent: marked > 0 ? Number((attendance.presentCount / marked * 100).toFixed(1)) : null,
     };
   });
@@ -741,4 +792,5 @@ module.exports = {
   getStudentsAttendanceSummary,
   getStudentAttendanceHistory,
   getAdminDashboard,
+  combineTeacherScoreAggregates,
 };

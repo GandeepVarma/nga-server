@@ -2,13 +2,14 @@ const express = require("express");
 const router = express.Router();
 const {
   createTest, getTests, getTestById, updateTest, setPublishStatus,
-  duplicateTest, deleteTest, getAnalytics, getSubmissions, exportSubmissionsCSV,
+  duplicateTest, deleteTest, getAnalytics, getSubmissions, getSubmissionReview,
+  getOnlineTestResults, exportSubmissionsCSV,
   getAssignmentOptions,
 } = require("../controllers/onlineTestController");
 const {
   getMyTests, getTestForStudent, startTest, saveProgress, submitTest, getResult,
 } = require("../controllers/studentOnlineTestController");
-const { protect, teacherOnly, studentOnly } = require("../middleware/auth");
+const { protect, teacherOnly, studentOnly, adminOnly } = require("../middleware/auth");
 const { requireFeature } = require("../middleware/featureAccess");
 
 // ---------- Student routes (must come before /:id to avoid route collision) ----------
@@ -20,6 +21,7 @@ router.post("/student/:id/submit", protect, studentOnly, requireFeature("tests")
 router.get("/student/:id/result", protect, studentOnly, requireFeature("tests"), getResult);
 
 router.get("/assignment-options", protect, teacherOnly, requireFeature("assignments"), getAssignmentOptions);
+router.get("/results", protect, adminOnly, requireFeature("tests"), getOnlineTestResults);
 
 // ---------- Staff routes (Admin sees/manages all; Teacher scoped to own tests) ----------
 router.route("/").post(protect, teacherOnly, requireFeature("tests"), createTest).get(protect, teacherOnly, requireFeature("tests"), getTests);
@@ -34,6 +36,7 @@ router.post("/:id/publish", protect, teacherOnly, requireFeature("tests"), setPu
 router.post("/:id/duplicate", protect, teacherOnly, requireFeature("tests"), duplicateTest);
 router.get("/:id/analytics", protect, teacherOnly, requireFeature("analytics"), getAnalytics);
 router.get("/:id/submissions", protect, teacherOnly, requireFeature("tests"), getSubmissions);
+router.get("/:id/submissions/:studentId/review", protect, teacherOnly, requireFeature("tests"), getSubmissionReview);
 router.get("/:id/export", protect, teacherOnly, requireFeature("tests"), exportSubmissionsCSV);
 
 module.exports = router;
