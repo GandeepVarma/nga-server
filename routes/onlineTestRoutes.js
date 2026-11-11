@@ -26,6 +26,8 @@ router.get("/results", protect, adminOnly, requireFeature("tests"), getOnlineTes
 // ---------- Staff routes (Admin sees/manages all; Teacher scoped to own tests) ----------
 router.route("/").post(protect, teacherOnly, requireFeature("tests"), createTest).get(protect, teacherOnly, requireFeature("tests"), getTests);
 
+router.get("/:id/submissions/:studentId/review", protect, teacherOnly, requireFeature("tests"), getSubmissionReview);
+
 router
   .route("/:id")
   .get(protect, teacherOnly, requireFeature("tests"), getTestById)
@@ -36,7 +38,6 @@ router.post("/:id/publish", protect, teacherOnly, requireFeature("tests"), setPu
 router.post("/:id/duplicate", protect, teacherOnly, requireFeature("tests"), duplicateTest);
 router.get("/:id/analytics", protect, teacherOnly, requireFeature("analytics"), getAnalytics);
 router.get("/:id/submissions", protect, teacherOnly, requireFeature("tests"), getSubmissions);
-router.get("/:id/submissions/:studentId/review", protect, teacherOnly, requireFeature("tests"), getSubmissionReview);
 router.get("/:id/export", protect, teacherOnly, requireFeature("tests"), exportSubmissionsCSV);
 
 module.exports = router;
