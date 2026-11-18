@@ -3,6 +3,7 @@ const asyncHandler = require("express-async-handler");
 const Teacher = require("../models/Teacher");
 const Student = require("../models/Student");
 const Academy = require("../models/Academy");
+const { isTokenIssuedBeforePasswordChange } = require("../utils/passwordPolicy");
 
 // Verifies the JWT and attaches the authenticated user to req.user.
 // req.userType is "staff" (a Teacher-collection account — teacher, admin,
@@ -39,7 +40,7 @@ const protect = asyncHandler(async (req, res, next) => {
     req.academyId = req.user.academyId || decoded.academyId || null;
     req.user.academyId = req.academyId;
 
-    if (req.user.passwordChangedAt && decoded.iat * 1000 < req.user.passwordChangedAt.getTime()) {
+    if (isTokenIssuedBeforePasswordChange(decoded.iat, req.user.passwordChangedAt)) {
       res.status(401);
       throw new Error("Not authorized, token invalid or expired");
     }

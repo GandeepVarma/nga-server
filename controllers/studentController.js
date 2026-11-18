@@ -6,6 +6,7 @@ const Assignment = require("../models/Assignment");
 const Attendance = require("../models/Attendance");
 const Fee = require("../models/Fee");
 const { academyFilter, requireAcademyId } = require("../utils/tenant");
+const { PASSWORD_POLICY_MESSAGE, getPasswordChangedAt, isStrongPassword } = require("../utils/passwordPolicy");
 
 // Small helper: builds the base filter every student query must start from.
 // Admin -> no restriction. Teacher -> only their own assigned students.
@@ -40,6 +41,10 @@ const createStudent = asyncHandler(async (req, res) => {
   if (!studentId || !name || !parentName || !phone || !className || !password) {
     res.status(400);
     throw new Error("Please fill in all required student fields");
+  }
+  if (!isStrongPassword(password)) {
+    res.status(400);
+    throw new Error(PASSWORD_POLICY_MESSAGE);
   }
 
   // Teachers can only ever assign to themselves; admins choose explicitly.
@@ -159,7 +164,14 @@ const updateStudent = asyncHandler(async (req, res) => {
     student.assignedTeacher = req.body.assignedTeacher;
   }
 
-  if (req.body.password) student.password = req.body.password;
+  if (req.body.password !== undefined && req.body.password !== "") {
+    if (!isStrongPassword(req.body.password)) {
+      res.status(400);
+      throw new Error(PASSWORD_POLICY_MESSAGE);
+    }
+    student.password = req.body.password;
+    student.passwordChangedAt = getPasswordChangedAt();
+  }
 
   await student.save();
   res.json({ success: true, data: { ...student.toObject(), password: undefined } });

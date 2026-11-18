@@ -4,6 +4,7 @@ const {
   createTest,
   getTests,
   getTestById,
+  updateTest,
   updateMarks,
   deleteMark,
   deleteTest,
@@ -18,7 +19,7 @@ router.get("/my", protect, studentOnly, requireFeature("tests"), getMyTests);
 
 router.route("/").post(protect, teacherOnly, requireFeature("tests"), createTest).get(protect, teacherOnly, requireFeature("tests"), getTests);
 
-router.route("/:id").get(protect, teacherOnly, requireFeature("tests"), getTestById).delete(protect, teacherOnly, requireFeature("tests"), deleteTest);
+router.route("/:id").get(protect, teacherOnly, requireFeature("tests"), getTestById).put(protect, teacherOnly, requireFeature("tests"), updateTest).delete(protect, teacherOnly, requireFeature("tests"), deleteTest);
 
 router.put("/:id/marks", protect, teacherOnly, requireFeature("tests"), updateMarks);
 router.delete("/:id/marks/:studentId", protect, teacherOnly, requireFeature("tests"), deleteMark);

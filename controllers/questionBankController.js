@@ -1,6 +1,8 @@
 const asyncHandler = require("express-async-handler");
 const QuestionBank = require("../models/QuestionBank");
 
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const academyFilter = (req) => {
   if (!req.user.academyId) {
     const error = new Error("This account is not assigned to an academy");
@@ -18,10 +20,12 @@ const getQuestionBank = asyncHandler(async (req, res) => {
     if (req.query[field]) query[field] = req.query[field];
   });
   if (req.query.search) {
+    const search = escapeRegex(String(req.query.search));
     query.$or = [
-      { question: { $regex: req.query.search, $options: "i" } },
-      { subject: { $regex: req.query.search, $options: "i" } },
-      { chapter: { $regex: req.query.search, $options: "i" } },
+      { question: { $regex: search, $options: "i" } },
+      { subject: { $regex: search, $options: "i" } },
+      { chapter: { $regex: search, $options: "i" } },
+      { topic: { $regex: search, $options: "i" } },
     ];
   }
   const questions = await QuestionBank.find(query).populate("createdBy", "name").sort({ createdAt: -1 });

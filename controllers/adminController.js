@@ -6,7 +6,10 @@ const Submission = require("../models/Submission");
 const Assignment = require("../models/Assignment");
 const Fee = require("../models/Fee");
 const Attendance = require("../models/Attendance");
+const OnlineTest = require("../models/OnlineTest");
+const NotificationLog = require("../models/NotificationLog");
 const { academyFilter, requireAcademyId } = require("../utils/tenant");
+const { PASSWORD_POLICY_MESSAGE, getPasswordChangedAt, isStrongPassword } = require("../utils/passwordPolicy");
 
 const combineTeacherScoreAggregates = (regularScores = [], onlineScores = []) => {
   const combined = new Map();
@@ -44,6 +47,10 @@ const createTeacher = asyncHandler(async (req, res) => {
   if (!name || !email || !password) {
     res.status(400);
     throw new Error("Name, email and password are required");
+  }
+  if (!isStrongPassword(password)) {
+    res.status(400);
+    throw new Error(PASSWORD_POLICY_MESSAGE);
   }
 
   const academyId = requireAcademyId(req);
@@ -186,9 +193,9 @@ const setTeacherStatus = asyncHandler(async (req, res) => {
 // @access  Admin
 const resetTeacherPassword = asyncHandler(async (req, res) => {
   const { newPassword } = req.body;
-  if (!newPassword || newPassword.length < 6) {
+  if (!isStrongPassword(newPassword)) {
     res.status(400);
-    throw new Error("newPassword is required and must be at least 6 characters");
+    throw new Error(PASSWORD_POLICY_MESSAGE);
   }
 
   const teacher = await Teacher.findOne(academyFilter(req, { _id: req.params.id, role: "teacher" }));
@@ -198,6 +205,7 @@ const resetTeacherPassword = asyncHandler(async (req, res) => {
   }
 
   teacher.password = newPassword; // pre-save hook hashes it
+  teacher.passwordChangedAt = getPasswordChangedAt();
   await teacher.save();
 
   res.json({ success: true, message: "Password reset successfully" });
@@ -334,6 +342,31 @@ const getAdminDashboard = asyncHandler(async (req, res) => {
   endOfDay.setHours(23, 59, 59, 999);
   const startOfDay = new Date(now);
   startOfDay.setHours(0, 0, 0, 0);
+  const parseDashboardDate = (value, fallback) => {
+    if (!value) return fallback;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value ? null : date;
+  };
+  const requestedStart = parseDashboardDate(req.query.dateFrom, null);
+  const requestedEnd = parseDashboardDate(req.query.dateTo, null);
+  if (req.query.dateFrom && !requestedStart) {
+    res.status(400);
+    throw new Error("dateFrom must use YYYY-MM-DD format");
+  }
+  if (req.query.dateTo && !requestedEnd) {
+    res.status(400);
+    throw new Error("dateTo must use YYYY-MM-DD format");
+  }
+  if (requestedStart && requestedEnd && requestedStart > requestedEnd) {
+    res.status(400);
+    throw new Error("dateFrom cannot be after dateTo");
+  }
+  const dashboardStart = requestedStart || startOfDay;
+  dashboardStart.setUTCHours(0, 0, 0, 0);
+  const dashboardEnd = requestedEnd
+    ? new Date(requestedEnd.getTime() + 24 * 60 * 60 * 1000 - 1)
+    : endOfDay;
   const previousDayStart = new Date(startOfDay);
   previousDayStart.setDate(previousDayStart.getDate() - 1);
   const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -350,7 +383,7 @@ const getAdminDashboard = asyncHandler(async (req, res) => {
     ? Number((((current - previous) / previous) * 100).toFixed(1))
     : null;
 
-  const [studentSummaryResult, teachers, attendanceResult, feeResult, testResult, onlineTeacherScores, recentTests, recentAssignments, recentAttendance, recentPayments] = await Promise.all([
+  const [studentSummaryResult, teachers, attendanceResult, feeResult, testResult, onlineTeacherScores, recentTests, recentAssignments, recentAttendance, recentPayments, upcomingTests, feeDueAlerts, todaysAbsentStudents, academyNotifications] = await Promise.all([
     Student.aggregate([
       { $match: { academyId } },
       {
@@ -606,6 +639,22 @@ const getAdminDashboard = asyncHandler(async (req, res) => {
     Assignment.find({ academyId }).sort({ createdAt: -1 }).limit(5).select("title class createdAt").lean(),
     Attendance.find({ academyId }).sort({ updatedAt: -1 }).limit(5).select("student status date updatedAt").populate("student", "name").lean(),
     Fee.find({ academyId, paymentDate: { $ne: null } }).sort({ paymentDate: -1 }).limit(5).select("student month paymentDate").populate("student", "name").lean(),
+    OnlineTest.find({
+      academyId,
+      published: true,
+      startTime: { $gte: dashboardStart, $lte: dashboardEnd },
+    }).sort({ startTime: 1 }).limit(8).select("title subject class batch startTime endTime duration").lean(),
+    Fee.find({
+      academyId,
+      pending: { $gt: 0 },
+      dueDate: { $lte: dashboardEnd },
+    }).populate("student", "name studentId class phone").sort({ dueDate: 1 }).limit(8).lean(),
+    Attendance.find({
+      academyId,
+      date: { $gte: startOfDay, $lte: endOfDay },
+      status: "Absent",
+    }).populate("student", "name studentId class phone").sort({ updatedAt: -1 }).limit(8).lean(),
+    NotificationLog.find({ academyId }).sort({ createdAt: -1 }).limit(8).select("type recipientName message status createdAt").lean(),
   ]);
 
   const studentSummary = studentSummaryResult[0] || {};
@@ -765,6 +814,34 @@ const getAdminDashboard = asyncHandler(async (req, res) => {
         return { _id: test._id, testName: test.testName, subject: test.subject, class: test.class, date: test.date, averageScorePercent, gradedMarks: scores.length };
       }),
       recentActivities,
+      upcomingTests,
+      feeDueAlerts: feeDueAlerts.map((fee) => ({
+        _id: fee._id,
+        month: fee.month,
+        pending: fee.pending,
+        dueDate: fee.dueDate,
+        student: fee.student,
+      })),
+      todaysAbsentStudents: todaysAbsentStudents
+        .filter((record) => record.student)
+        .map((record) => ({
+          _id: record._id,
+          status: record.status,
+          date: record.date,
+          student: record.student,
+        })),
+      academyNotifications: academyNotifications.map((notification) => ({
+        _id: notification._id,
+        type: notification.type,
+        recipientName: notification.recipientName,
+        message: notification.message,
+        status: notification.status,
+        createdAt: notification.createdAt,
+      })),
+      dashboardDateRange: {
+        dateFrom: requestedStart ? requestedStart.toISOString().slice(0, 10) : null,
+        dateTo: req.query.dateTo || null,
+      },
       comparisons: {
         admissionsPercent: monthAdmissionsComparison,
         revenuePercent: monthRevenueComparison,

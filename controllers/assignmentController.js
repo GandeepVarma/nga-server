@@ -6,6 +6,24 @@ const whatsapp = require("../services/whatsappService");
 const Settings = require("../models/Settings");
 const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
+const getAssignmentDisplayStatus = (status, submissionDate, now = new Date()) => {
+  const todayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const dueDate = new Date(submissionDate);
+  if (status === "Pending" && !Number.isNaN(dueDate.getTime()) && dueDate.getTime() < todayStart) {
+    return "Late Submission";
+  }
+  return status;
+};
+
+const withDisplayStatuses = (assignment) => {
+  const data = typeof assignment.toObject === "function" ? assignment.toObject() : { ...assignment };
+  data.assignedStudents = data.assignedStudents.map((entry) => ({
+    ...entry,
+    status: getAssignmentDisplayStatus(entry.status, data.submissionDate),
+  }));
+  return data;
+};
+
 const allowedStudentIds = async (req) => {
   const filter = req.user.role === "admin" ? { academyId: requireAcademyId(req) } : { academyId: requireAcademyId(req), assignedTeacher: req.user._id };
   const students = await Student.find(filter).select("_id");
@@ -27,13 +45,44 @@ const createAssignment = asyncHandler(async (req, res) => {
   const allowedIds = await allowedStudentIds(req);
 
   let students = studentIds;
-  if (students && typeof students === "string") students = JSON.parse(students);
+  if (students !== undefined && students !== null && typeof students !== "string" && !Array.isArray(students)) {
+    res.status(400);
+    throw new Error("studentIds must be an array of student IDs");
+  }
+  if (students && typeof students === "string") {
+    try {
+      students = JSON.parse(students);
+    } catch {
+      res.status(400);
+      throw new Error("studentIds must be a JSON array");
+    }
+    if (!Array.isArray(students)) {
+      res.status(400);
+      throw new Error("studentIds must be a JSON array");
+    }
+  }
 
   if (students && students.length > 0) {
+    if (!Array.isArray(students) || new Set(students.map((id) => id.toString())).size !== students.length) {
+      res.status(400);
+      throw new Error("studentIds must be an array of unique student IDs");
+    }
     const invalid = students.filter((id) => !allowedIds.includes(id.toString()));
     if (invalid.length > 0) {
       res.status(403);
       throw new Error("Access denied: one or more students are not assigned to you");
+    }
+    const activeClassFilter = {
+      academyId: requireAcademyId(req),
+      class: className,
+      status: "Active",
+      _id: { $in: students },
+    };
+    if (req.user.role !== "admin") activeClassFilter.assignedTeacher = req.user._id;
+    const validCount = await Student.countDocuments(activeClassFilter);
+    if (validCount !== students.length) {
+      res.status(400);
+      throw new Error("Selected students must be active students in the chosen class");
     }
   } else {
     const filter =
@@ -97,7 +146,8 @@ const getAssignments = asyncHandler(async (req, res) => {
     .sort({ submissionDate: -1 });
 
   if (req.user.role === "admin") {
-    return res.json({ success: true, count: assignments.length, data: assignments });
+    const data = assignments.map(withDisplayStatuses);
+    return res.json({ success: true, count: data.length, data });
   }
 
   const allowedIds = await allowedStudentIds(req);
@@ -107,7 +157,7 @@ const getAssignments = asyncHandler(async (req, res) => {
         allowedIds.includes(s.student._id.toString())
       );
       if (assignedStudents.length === 0) return null;
-      return { ...a.toObject(), assignedStudents };
+      return withDisplayStatuses({ ...a.toObject(), assignedStudents });
     })
     .filter(Boolean);
 
@@ -136,10 +186,10 @@ const getAssignmentById = asyncHandler(async (req, res) => {
       res.status(403);
       throw new Error("Access denied: none of these students are assigned to you");
     }
-    return res.json({ success: true, data: { ...assignment.toObject(), assignedStudents } });
+    return res.json({ success: true, data: withDisplayStatuses({ ...assignment.toObject(), assignedStudents }) });
   }
 
-  res.json({ success: true, data: assignment });
+  res.json({ success: true, data: withDisplayStatuses(assignment) });
 });
 
 // @desc    Update a student's submission status (scoped for teachers)
@@ -166,10 +216,16 @@ const updateSubmissionStatus = asyncHandler(async (req, res) => {
     throw new Error("This student is not assigned to this assignment");
   }
 
+  if (req.body.status && !["Pending", "Completed", "Late Submission"].includes(req.body.status)) {
+    res.status(400);
+    throw new Error("Status must be Pending, Completed, or Late Submission");
+  }
   if (req.body.status) entry.status = req.body.status;
   if (req.body.teacherRemarks !== undefined) entry.teacherRemarks = req.body.teacherRemarks;
   if (req.body.status === "Completed" || req.body.status === "Late Submission") {
     entry.submittedAt = new Date();
+  } else if (req.body.status === "Pending") {
+    entry.submittedAt = null;
   }
 
   await assignment.save();
@@ -212,7 +268,8 @@ const getMyAssignments = asyncHandler(async (req, res) => {
       class: a.class,
       files: a.files,
       submissionDate: a.submissionDate,
-      status: entry ? entry.status : "Pending",
+      status: getAssignmentDisplayStatus(entry ? entry.status : "Pending", a.submissionDate),
+      submittedAt: entry?.submittedAt || null,
       teacherRemarks: entry ? entry.teacherRemarks : "",
     };
   });
@@ -227,4 +284,6 @@ module.exports = {
   updateSubmissionStatus,
   deleteAssignment,
   getMyAssignments,
+  getAssignmentDisplayStatus,
+  withDisplayStatuses,
 };

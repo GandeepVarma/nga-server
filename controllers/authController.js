@@ -5,6 +5,7 @@ const Academy = require("../models/Academy");
 const generateToken = require("../utils/generateToken");
 const { getAcademyFeatureAccess } = require("../middleware/featureAccess");
 const { getFeatureAccessForPlan } = require("../config/planFeatures");
+const { PASSWORD_POLICY_MESSAGE, getPasswordChangedAt, isStrongPassword } = require("../utils/passwordPolicy");
 
 // NOTE: There is deliberately NO public "register" endpoint for staff
 // accounts directly. Academy Admin accounts are created two ways: by
@@ -58,9 +59,9 @@ const changePassword = asyncHandler(async (req, res) => {
     throw new Error("Current password and new password are required");
   }
 
-  if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/.test(newPassword)) {
+  if (!isStrongPassword(newPassword)) {
     res.status(400);
-    throw new Error("New password must be at least 8 characters and include uppercase, lowercase, and a number");
+    throw new Error(PASSWORD_POLICY_MESSAGE);
   }
 
   const UserModel = req.userType === "student" ? Student : Teacher;
@@ -77,7 +78,7 @@ const changePassword = asyncHandler(async (req, res) => {
   }
 
   user.password = newPassword;
-  user.passwordChangedAt = new Date();
+  user.passwordChangedAt = getPasswordChangedAt();
   await user.save();
 
   res.json({ success: true, message: "Password changed successfully" });

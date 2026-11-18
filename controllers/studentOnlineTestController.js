@@ -292,4 +292,13 @@ const getResult = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { getMyTests, getTestForStudent, startTest, saveProgress, submitTest, getResult, buildAnswerReview };
+module.exports = {
+  getMyTests,
+  getTestForStudent,
+  startTest,
+  saveProgress,
+  submitTest,
+  getResult,
+  buildAnswerReview,
+  scoreSubmission,
+};

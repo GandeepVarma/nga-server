@@ -6,6 +6,7 @@ const Program = require("../models/Program");
 const Story = require("../models/Story");
 const DigitalHub = require("../models/DigitalHub");
 const StudentResult = require("../models/StudentResult");
+const { PASSWORD_POLICY_MESSAGE, isStrongPassword } = require("../utils/passwordPolicy");
 
 // @desc    Active pricing plans for the public Pricing page
 // @route   GET /api/public/plans
@@ -84,9 +85,9 @@ const registerAcademy = asyncHandler(async (req, res) => {
     res.status(400);
     throw new Error("academyName, ownerName, ownerEmail, phone and password are required");
   }
-  if (password.length < 6) {
+  if (!isStrongPassword(password)) {
     res.status(400);
-    throw new Error("Password must be at least 6 characters");
+    throw new Error(PASSWORD_POLICY_MESSAGE);
   }
   if (!["online", "offline"].includes(paymentMethod)) {
     res.status(400);

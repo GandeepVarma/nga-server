@@ -1,4 +1,5 @@
 const asyncHandler = require("express-async-handler");
+const crypto = require("crypto");
 const Academy = require("../models/Academy");
 const Teacher = require("../models/Teacher");
 const Student = require("../models/Student");
@@ -31,8 +32,7 @@ const generateAcademyId = async () => {
 // Generates a temporary password to hand to a new Academy Admin — this
 // project has no outbound email system, so Super Admin sees it once in the
 // creation response and shares it with the academy owner directly.
-const generateTempPassword = () =>
-  Math.random().toString(36).slice(-6) + Math.random().toString(36).slice(-4).toUpperCase() + "!1";
+const generateTempPassword = () => `${crypto.randomBytes(24).toString("hex")}aA1!`;
 
 // @desc    Platform-wide statistics for the Super Admin dashboard.
 //          Revenue/subscription figures are Phase 3 — returned as explicit
@@ -364,6 +364,7 @@ const updatePlan = asyncHandler(async (req, res) => {
 
 module.exports = {
   getDashboard, createAcademy, getAcademies, getAcademyById, updateAcademy, setAcademyStatus,
+  generateTempPassword,
   getPlans, createPlan, updatePlan, deleteAcademy,
   assignAcademyPlan, updateAcademyFeatures,
 };

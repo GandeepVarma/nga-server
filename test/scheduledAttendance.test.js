@@ -6,7 +6,13 @@ const {
   isVisibleInAttendanceHistory,
   sortUpcomingClassesByAttendance,
   getUnscheduledClassBatches,
+  validateDate,
 } = require("../controllers/scheduledClassController");
+
+test("date-only attendance values are validated and represented at UTC midnight", () => {
+  assert.equal(validateDate("2026-03-08").toISOString(), "2026-03-08T00:00:00.000Z");
+  assert.equal(validateDate("2026-02-30"), null);
+});
 
 test("scheduled attendance is unique per student and scheduled class", () => {
   const indexes = Attendance.schema.indexes();
@@ -60,11 +66,12 @@ test("bulk scheduling skips existing batches without blocking missing batches", 
   );
 });
 
-test("marked sessions remain in staff history for seven days, then disappear", () => {
+test("only marked sessions remain in staff history for seven days", () => {
   const now = new Date("2026-10-26T00:00:00.000Z");
   const sevenDays = 7 * 24 * 60 * 60 * 1000;
 
-  assert.equal(isVisibleInAttendanceHistory(null, now), true);
+  assert.equal(isVisibleInAttendanceHistory(null, now), false);
+  assert.equal(isVisibleInAttendanceHistory(undefined, now), false);
   assert.equal(isVisibleInAttendanceHistory(new Date(now.getTime() - sevenDays + 1), now), true);
   assert.equal(isVisibleInAttendanceHistory(new Date(now.getTime() - sevenDays), now), false);
   assert.equal(isVisibleInAttendanceHistory(new Date(now.getTime() - sevenDays - 1), now), false);

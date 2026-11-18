@@ -7,6 +7,8 @@ const {
   recordPayment,
   undoPayment,
   deleteFee,
+  getPaymentHistory,
+  getPaymentReceipt,
   getFeeSummary,
   sendManualReminder,
 } = require("../controllers/feeController");
@@ -19,6 +21,8 @@ router.post("/generate", protect, adminOnly, requireFeature("fees"), generateMon
 router.get("/summary", protect, adminOnly, requireFeature("fees"), getFeeSummary);
 router.get("/my", protect, studentOnly, requireFeature("fees"), getMyFees);
 router.put("/:id/pay", protect, adminOnly, requireFeature("fees"), recordPayment);
+router.get("/:id/payments", protect, adminOnly, requireFeature("fees"), getPaymentHistory);
+router.get("/:id/receipts/:paymentId", protect, adminOnly, requireFeature("fees"), getPaymentReceipt);
 router.put("/:id/undo-payment", protect, adminOnly, requireFeature("fees"), undoPayment);
 router.post("/:id/remind", protect, adminOnly, requireFeature("fees"), sendManualReminder);
 router.delete("/:id", protect, adminOnly, requireFeature("fees"), deleteFee);

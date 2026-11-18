@@ -1,5 +1,22 @@
 const mongoose = require("mongoose");
 
+const paymentTransactionSchema = new mongoose.Schema(
+  {
+    requestId: { type: String, required: true, trim: true },
+    amount: { type: Number, required: true, min: 0.01 },
+    date: { type: Date, default: null },
+    modeOfPayment: {
+      type: String,
+      enum: ["Cash", "UPI", "Card", "Bank Transfer", "Cheque", "Other", null],
+      default: null,
+    },
+    receiptNumber: { type: String, default: null, trim: true },
+    outstandingBalance: { type: Number, required: true, min: 0 },
+    legacy: { type: Boolean, default: false },
+  },
+  { _id: true, timestamps: false }
+);
+
 const feeSchema = new mongoose.Schema(
   {
     academyId: { type: mongoose.Schema.Types.ObjectId, ref: "Academy", required: true, index: true },
@@ -18,12 +35,15 @@ const feeSchema = new mongoose.Schema(
     },
     status: { type: String, enum: ["Paid", "Partial", "Pending"], default: "Pending" },
     receiptNumber: { type: String, default: null },
+    // New installments are append-only; older aggregate payments are snapshotted on the next payment.
+    paymentHistory: { type: [paymentTransactionSchema], default: [] },
   },
   { timestamps: true }
 );
 
 feeSchema.index({ student: 1, month: 1 }, { unique: true });
 feeSchema.index({ academyId: 1, student: 1, month: 1 });
+feeSchema.index({ "paymentHistory.requestId": 1 }, { unique: true, sparse: true });
 
 feeSchema.pre("save", function (next) {
   const totalDue = this.amount + this.carryForward;

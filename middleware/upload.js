@@ -1,4 +1,5 @@
 const multer = require("multer");
+const path = require("path");
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const cloudinary = require("../config/cloudinary");
 
@@ -14,11 +15,17 @@ const storage = new CloudinaryStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowed = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
-  if (allowed.includes(file.mimetype)) {
+  const allowedExtensions = {
+    "image/jpeg": [".jpg", ".jpeg"],
+    "image/png": [".png"],
+    "image/webp": [".webp"],
+    "application/pdf": [".pdf"],
+  };
+  const extensions = allowedExtensions[file.mimetype];
+  if (extensions && extensions.includes(path.extname(file.originalname).toLowerCase())) {
     cb(null, true);
   } else {
-    cb(new Error("Only JPG, PNG, WEBP images and PDF files are allowed"), false);
+    cb(new Error("Only matching JPG, PNG, WEBP images and PDF files are allowed"), false);
   }
 };
 

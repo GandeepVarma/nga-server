@@ -6,6 +6,57 @@ const whatsapp = require("../services/whatsappService");
 const Settings = require("../models/Settings");
 const { academyFilter, requireAcademyId } = require("../utils/tenant");
 
+const getGrade = (percentage) => {
+  if (percentage >= 90) return "A";
+  if (percentage >= 80) return "B";
+  if (percentage >= 70) return "C";
+  if (percentage >= 60) return "D";
+  return "F";
+};
+
+const buildMarkResults = (marks, maxMarks) => {
+  const graded = marks
+    .filter((entry) => Number.isFinite(entry.marksObtained))
+    .sort((first, second) => second.marksObtained - first.marksObtained);
+  const ranks = new Map();
+  graded.forEach((entry, index) => {
+    const key = String(entry.marksObtained);
+    if (!ranks.has(key)) ranks.set(key, index + 1);
+  });
+
+  return marks.map((entry) => {
+    const mark = typeof entry.toObject === "function" ? entry.toObject() : { ...entry };
+    if (!Number.isFinite(entry.marksObtained)) {
+      return { ...mark, percentage: null, grade: null, rank: null };
+    }
+    const rawPercentage = (entry.marksObtained / maxMarks) * 100;
+    const percentage = Number(rawPercentage.toFixed(1));
+    return {
+      ...mark,
+      percentage,
+      grade: getGrade(rawPercentage),
+      rank: ranks.get(String(entry.marksObtained)),
+    };
+  });
+};
+
+const buildTestStats = (marks) => {
+  const values = marks.map((entry) => entry.marksObtained).filter(Number.isFinite);
+  if (!values.length) return { average: 0, highest: 0, lowest: 0, submitted: 0 };
+  return {
+    average: Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2)),
+    highest: Math.max(...values),
+    lowest: Math.min(...values),
+    submitted: values.length,
+  };
+};
+
+const buildTestResponse = (test, marks = test.marks) => ({
+  ...test.toObject(),
+  marks: buildMarkResults(marks, test.maxMarks),
+  stats: buildTestStats(marks),
+});
+
 // Returns the set of student _ids (as strings) a staff member is allowed to
 // touch: all active students for Admin, or only their own for a Teacher.
 const allowedStudentIds = async (req) => {
@@ -84,7 +135,7 @@ const getTests = asyncHandler(async (req, res) => {
     .sort({ date: -1 });
 
   if (req.user.role === "admin") {
-    const withStats = tests.map((t) => ({ ...t.toObject(), stats: t.getStats() }));
+    const withStats = tests.map((t) => buildTestResponse(t));
     return res.json({ success: true, count: withStats.length, data: withStats });
   }
 
@@ -93,8 +144,7 @@ const getTests = asyncHandler(async (req, res) => {
     .map((t) => {
       const marks = t.marks.filter((m) => allowedIds.includes(m.student._id.toString()));
       if (marks.length === 0) return null;
-      const scopedTest = { ...t.toObject(), marks };
-      return { ...scopedTest, stats: t.getStats() };
+      return buildTestResponse(t, marks);
     })
     .filter(Boolean);
 
@@ -112,7 +162,7 @@ const getTestById = asyncHandler(async (req, res) => {
   }
 
   if (req.user.role === "admin") {
-    return res.json({ success: true, data: { ...test.toObject(), stats: test.getStats() } });
+    return res.json({ success: true, data: buildTestResponse(test) });
   }
 
   const allowedIds = await allowedStudentIds(req);
@@ -122,7 +172,63 @@ const getTestById = asyncHandler(async (req, res) => {
     throw new Error("Access denied: none of these students are assigned to you");
   }
 
-  res.json({ success: true, data: { ...test.toObject(), marks, stats: test.getStats() } });
+  res.json({ success: true, data: buildTestResponse(test, marks) });
+});
+
+const updateTest = asyncHandler(async (req, res) => {
+  const test = await Test.findOne(academyFilter(req, { _id: req.params.id }));
+  if (!test) {
+    res.status(404);
+    throw new Error("Test not found");
+  }
+  if (req.user.role !== "admin" && test.createdBy?.toString() !== req.user._id.toString()) {
+    res.status(403);
+    throw new Error("Access denied: you can only edit tests you created");
+  }
+
+  const { testName, subject, maxMarks, date, class: className } = req.body;
+  if (className !== undefined && className !== test.class) {
+    res.status(400);
+    throw new Error("A test's class cannot be changed after students have been assigned");
+  }
+  if (testName !== undefined && !String(testName).trim()) {
+    res.status(400);
+    throw new Error("Test name is required");
+  }
+  if (subject !== undefined && !String(subject).trim()) {
+    res.status(400);
+    throw new Error("Subject is required");
+  }
+  if (maxMarks !== undefined) {
+    const numericMax = Number(maxMarks);
+    if (!Number.isFinite(numericMax) || numericMax < 1) {
+      res.status(400);
+      throw new Error("Maximum marks must be at least 1");
+    }
+    if (test.marks.some((entry) => entry.marksObtained > numericMax)) {
+      res.status(400);
+      throw new Error("Maximum marks cannot be lower than marks already awarded");
+    }
+    test.maxMarks = numericMax;
+  }
+  if (date !== undefined) {
+    const parsedDate = new Date(date);
+    if (!date || Number.isNaN(parsedDate.getTime())) {
+      res.status(400);
+      throw new Error("A valid test date is required");
+    }
+    test.date = parsedDate;
+  }
+  if (testName !== undefined) test.testName = testName;
+  if (subject !== undefined) test.subject = subject;
+
+  await test.save();
+  await test.populate("marks.student", "name studentId");
+  const allowedIds = req.user.role === "admin" ? null : await allowedStudentIds(req);
+  const resultMarks = allowedIds
+    ? test.marks.filter((entry) => entry.student && allowedIds.includes(entry.student._id.toString()))
+    : test.marks;
+  res.json({ success: true, data: buildTestResponse(test, resultMarks) });
 });
 
 // @desc    Enter or update marks. Teacher can only submit marks for
@@ -141,6 +247,22 @@ const updateMarks = asyncHandler(async (req, res) => {
     res.status(400);
     throw new Error("marks must be an array of { studentId, marksObtained }");
   }
+  const studentIdsInRequest = marks.map((entry) => entry?.studentId?.toString());
+  if (
+    marks.some((entry) => !entry || entry.marksObtained === undefined) ||
+    studentIdsInRequest.some((id) => !id) ||
+    new Set(studentIdsInRequest).size !== studentIdsInRequest.length
+  ) {
+    res.status(400);
+    throw new Error("Each mark must include a unique studentId and marksObtained");
+  }
+  if (marks.some(({ marksObtained }) => {
+    if (marksObtained === "" || marksObtained === null || marksObtained === undefined) return false;
+    return !Number.isFinite(marksObtained) || marksObtained < 0 || marksObtained > test.maxMarks;
+  })) {
+    res.status(400);
+    throw new Error(`Marks must be between 0 and ${test.maxMarks}`);
+  }
 
   const allowedIds = await allowedStudentIds(req);
   const invalid = marks.filter((m) => !allowedIds.includes(m.studentId.toString()));
@@ -156,6 +278,7 @@ const updateMarks = asyncHandler(async (req, res) => {
   });
 
   await test.save();
+  await test.populate("marks.student", "name studentId");
 
   const studentIds = marks.map((m) => m.studentId);
   await notifyStudents(
@@ -187,7 +310,10 @@ const updateMarks = asyncHandler(async (req, res) => {
     })
     .catch((err) => console.error("[whatsapp] result notification failed:", err.message));
 
-  res.json({ success: true, data: { ...test.toObject(), stats: test.getStats() } });
+  const resultMarks = req.user.role === "admin"
+    ? test.marks
+    : test.marks.filter((entry) => allowedIds.includes(entry.student._id.toString()));
+  res.json({ success: true, data: buildTestResponse(test, resultMarks) });
 });
 
 // @desc    Clear a single student's mark entry (scoped)
@@ -287,7 +413,8 @@ const getMyTests = asyncHandler(async (req, res) => {
   const tests = await Test.find(academyFilter(req, { "marks.student": req.user._id })).sort({ date: -1 });
 
   const data = tests.map((t) => {
-    const entry = t.marks.find((m) => m.student.toString() === req.user._id.toString());
+    const results = buildMarkResults(t.marks, t.maxMarks);
+    const entry = results.find((m) => m.student.toString() === req.user._id.toString());
     return {
       _id: t._id,
       testName: t.testName,
@@ -296,6 +423,9 @@ const getMyTests = asyncHandler(async (req, res) => {
       maxMarks: t.maxMarks,
       date: t.date,
       marksObtained: entry ? entry.marksObtained : null,
+      percentage: entry?.percentage ?? null,
+      grade: entry?.grade ?? null,
+      rank: entry?.rank ?? null,
     };
   });
 
@@ -306,9 +436,14 @@ module.exports = {
   createTest,
   getTests,
   getTestById,
+  updateTest,
   updateMarks,
   deleteMark,
   deleteTest,
   compareTests,
   getMyTests,
+  getGrade,
+  buildMarkResults,
+  buildTestStats,
+  buildTestResponse,
 };

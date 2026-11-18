@@ -64,7 +64,7 @@ const dispatch = async ({ to, name, message, type, studentId = null, sentBy = nu
     });
   }
 
-  const settings = await Settings.getSingleton(academyId);
+  const settings = await Settings.getSingleton(academyId, { includeSecrets: true });
   const { phoneNumberId, accessToken } = settings.whatsapp;
 
   if (!phoneNumberId || !accessToken) {

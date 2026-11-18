@@ -10,7 +10,7 @@ const { requireAcademyId } = require("../utils/tenant");
 const HISTORY_ATTENDANCE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 const isVisibleInAttendanceHistory = (lastMarkedAt, now = new Date()) =>
-  !lastMarkedAt || lastMarkedAt.getTime() > now.getTime() - HISTORY_ATTENDANCE_RETENTION_MS;
+  Boolean(lastMarkedAt) && lastMarkedAt.getTime() > now.getTime() - HISTORY_ATTENDANCE_RETENTION_MS;
 
 const sortUpcomingClassesByAttendance = (classes) =>
   classes
@@ -132,7 +132,12 @@ const createScheduledClass = asyncHandler(async (req, res) => {
 
 const getScheduledClasses = asyncHandler(async (req, res) => {
   const academyId = requireAcademyId(req);
-  const today = new Date();
+  const requestedDate = req.query.date ? validateDate(req.query.date) : null;
+  if (req.query.date && !requestedDate) {
+    res.status(400);
+    throw new Error("date must be a valid YYYY-MM-DD date");
+  }
+  const today = requestedDate || new Date();
   today.setUTCHours(0, 0, 0, 0);
   const studentQuery = { academyId, status: "Active" };
   if (req.user.role !== "admin") studentQuery.assignedTeacher = req.user._id;
@@ -320,4 +325,5 @@ module.exports = {
   isVisibleInAttendanceHistory,
   sortUpcomingClassesByAttendance,
   getUnscheduledClassBatches,
+  validateDate,
 };

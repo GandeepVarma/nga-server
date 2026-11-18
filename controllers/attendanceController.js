@@ -9,6 +9,22 @@ const allowedStudentIds = async (req) => {
   return students.map((s) => s._id.toString());
 };
 
+const parseDateOnly = (value) => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value ? null : date;
+};
+
+const parseAttendanceDateRange = (startDateValue, endDateValue) => {
+  const startDate = parseDateOnly(startDateValue);
+  const endDate = parseDateOnly(endDateValue);
+  if (!startDate || !endDate || startDate > endDate) return null;
+  return {
+    $gte: startDate,
+    $lt: new Date(endDate.getTime() + 24 * 60 * 60 * 1000),
+  };
+};
+
 // @desc    Mark attendance for one or more students on a given date.
 //          Teachers can only mark attendance for their own assigned students.
 // @route   POST /api/attendance
@@ -20,13 +36,31 @@ const markAttendance = asyncHandler(async (req, res) => {
 });
 
 // @desc    Get attendance records, scoped to the requester's own students
-// @route   GET /api/attendance?class=&date=&student=&status=&session=
+// @route   GET /api/attendance?class=&date=&startDate=&endDate=&student=&status=&session=
 // @access  Staff (Admin or Teacher)
 const getAttendance = asyncHandler(async (req, res) => {
-  const { class: className, date, student, status, session } = req.query;
+  const { class: className, date, startDate, endDate, student, status, session } = req.query;
   const query = { academyId: requireAcademyId(req) };
   if (className) query.class = className;
-  if (date) query.date = new Date(date);
+  if (startDate || endDate) {
+    if (!startDate || !endDate || date) {
+      res.status(400);
+      throw new Error("Provide either date or both startDate and endDate");
+    }
+    const dateRange = parseAttendanceDateRange(startDate, endDate);
+    if (!dateRange) {
+      res.status(400);
+      throw new Error("A valid date range is required");
+    }
+    query.date = dateRange;
+  } else if (date) {
+    const requestedDate = parseDateOnly(date);
+    if (!requestedDate) {
+      res.status(400);
+      throw new Error("date must be a valid YYYY-MM-DD date");
+    }
+    query.date = requestedDate;
+  }
   if (student) query.student = student;
   if (status) {
     if (!["Present", "Absent", "Leave"].includes(status)) {
@@ -206,4 +240,11 @@ const getLowAttendanceStudents = asyncHandler(async (req, res) => {
   res.json({ success: true, count: students.length, data: students });
 });
 
-module.exports = { markAttendance, getAttendance, getTodaySummary, getAttendancePercentage, getLowAttendanceStudents };
+module.exports = {
+  markAttendance,
+  getAttendance,
+  getTodaySummary,
+  getAttendancePercentage,
+  getLowAttendanceStudents,
+  parseAttendanceDateRange,
+};

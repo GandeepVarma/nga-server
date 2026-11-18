@@ -7,7 +7,8 @@ const mongoose = require("mongoose");
 // .env, so it can be edited from the Settings UI without redeploying.
 // It's marked `select: false` so it's never returned in normal queries —
 // only the dedicated settings-read endpoint (admin-only) fetches it
-// explicitly, and only the backend ever sends it in an API call. For a
+// explicitly by settings administration and the WhatsApp sender; it is never
+// included in API responses. For a
 // production SaaS handling many academies, this should additionally be
 // encrypted at rest (e.g. via a KMS-backed field encryption library) —
 // that's flagged in the README as a follow-up rather than implemented here.
@@ -37,9 +38,13 @@ const settingsSchema = new mongoose.Schema(
 );
 
 // Always returns the single settings document, creating it on first use.
-settingsSchema.statics.getSingleton = async function (academyId) {
+settingsSchema.statics.getSingleton = async function (academyId, { includeSecrets = false } = {}) {
   if (!academyId) throw new Error("academyId is required for settings");
-  let doc = await this.findOne({ academyId }).select("+whatsapp.accessToken +whatsapp.webhookVerifyToken");
+  let query = this.findOne({ academyId });
+  if (includeSecrets) {
+    query = query.select("+whatsapp.accessToken +whatsapp.webhookVerifyToken");
+  }
+  let doc = await query;
   if (!doc) doc = await this.create({ academyId });
   return doc;
 };

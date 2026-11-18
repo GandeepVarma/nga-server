@@ -25,3 +25,19 @@ test("staff answer-review route is registered before generic test-id routes", ()
     "specific review route should precede the generic test-id route"
   );
 });
+
+test("online-test student workflow remains student-protected and staff creation remains staff-protected", () => {
+  const studentStart = onlineTestRoutes.stack.find(
+    (layer) => layer.route?.path === "/student/:id/start" && layer.route.methods.post
+  );
+  const staffCreate = onlineTestRoutes.stack.find(
+    (layer) => layer.route?.path === "/" && layer.route.methods.post
+  );
+
+  assert.ok(studentStart);
+  assert.equal(studentStart.route.stack[0].handle.name, "asyncUtilWrap");
+  assert.equal(studentStart.route.stack[1].handle.name, "studentOnly");
+  assert.ok(staffCreate);
+  assert.equal(staffCreate.route.stack[0].handle.name, "asyncUtilWrap");
+  assert.equal(staffCreate.route.stack[1].handle.name, "teacherOnly");
+});
