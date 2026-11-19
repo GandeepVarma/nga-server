@@ -12,6 +12,8 @@ const HISTORY_ATTENDANCE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const isVisibleInAttendanceHistory = (lastMarkedAt, now = new Date()) =>
   Boolean(lastMarkedAt) && lastMarkedAt.getTime() > now.getTime() - HISTORY_ATTENDANCE_RETENTION_MS;
 
+const isVisibleInUpcomingSchedule = (attendance) => Object.keys(attendance || {}).length === 0;
+
 const sortUpcomingClassesByAttendance = (classes) =>
   classes
     .map((scheduledClass, index) => ({ scheduledClass, index }))
@@ -149,10 +151,33 @@ const getScheduledClasses = asyncHandler(async (req, res) => {
 
   const dateSort = req.query.period === "history" ? -1 : 1;
   const scheduledClasses = await ScheduledClass.find(query).sort({ date: dateSort, session: 1 }).limit(500);
+  const unmarkedPastClasses = req.query.period === "upcoming"
+    ? await ScheduledClass.aggregate([
+        { $match: { academyId, class: { $in: studentPairs }, date: { $lt: today } } },
+        {
+          $lookup: {
+            from: Attendance.collection.name,
+            let: { scheduleId: "$_id" },
+            pipeline: [
+              { $match: { $expr: { $eq: ["$scheduledClass", "$$scheduleId"] } } },
+              { $match: { academyId } },
+              { $limit: 1 },
+            ],
+            as: "attendanceRecords",
+          },
+        },
+        { $match: { "attendanceRecords.0": { $exists: false } } },
+        { $sort: { date: -1, session: 1 } },
+        { $limit: 500 },
+      ])
+    : [];
+  const scheduleCandidates = [...scheduledClasses, ...unmarkedPastClasses].sort(
+    (a, b) => a.date - b.date || a.session.localeCompare(b.session)
+  );
   const eligiblePairs = new Set(
     (await Student.find(studentQuery).select("class batch")).map((student) => `${student.class}\u0000${student.batch || ""}`)
   );
-  const visibleClasses = scheduledClasses.filter((item) => eligiblePairs.has(`${item.class}\u0000${item.batch}`));
+  const visibleClasses = scheduleCandidates.filter((item) => eligiblePairs.has(`${item.class}\u0000${item.batch}`));
   const ids = visibleClasses.map((item) => item._id);
   const attendance = ids.length
     ? await Attendance.aggregate([
@@ -180,9 +205,13 @@ const getScheduledClasses = asyncHandler(async (req, res) => {
   });
   const classesToReturn = req.query.period === "history"
     ? visibleClasses.filter((item) => isVisibleInAttendanceHistory(lastMarkedAtByClass.get(item._id.toString())))
-    : visibleClasses;
+    : req.query.period === "upcoming"
+      ? visibleClasses.filter((item) =>
+          isVisibleInUpcomingSchedule(summaries.get(item._id.toString()))
+        )
+      : visibleClasses;
   const classesWithAttendance = classesToReturn.map((item) => ({
-    ...item.toObject(),
+    ...(typeof item.toObject === "function" ? item.toObject() : item),
     attendance: summaries.get(item._id.toString()) || {},
   }));
   const sortedClasses = req.query.period === "upcoming"
@@ -323,6 +352,7 @@ module.exports = {
   saveScheduledAttendance,
   deleteScheduledClass,
   isVisibleInAttendanceHistory,
+  isVisibleInUpcomingSchedule,
   sortUpcomingClassesByAttendance,
   getUnscheduledClassBatches,
   validateDate,

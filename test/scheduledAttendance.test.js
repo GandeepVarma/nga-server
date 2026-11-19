@@ -4,6 +4,7 @@ const Attendance = require("../models/Attendance");
 const ScheduledClass = require("../models/ScheduledClass");
 const {
   isVisibleInAttendanceHistory,
+  isVisibleInUpcomingSchedule,
   sortUpcomingClassesByAttendance,
   getUnscheduledClassBatches,
   validateDate,
@@ -75,6 +76,13 @@ test("only marked sessions remain in staff history for seven days", () => {
   assert.equal(isVisibleInAttendanceHistory(new Date(now.getTime() - sevenDays + 1), now), true);
   assert.equal(isVisibleInAttendanceHistory(new Date(now.getTime() - sevenDays), now), false);
   assert.equal(isVisibleInAttendanceHistory(new Date(now.getTime() - sevenDays - 1), now), false);
+});
+
+test("upcoming schedule only includes sessions with no attendance records", () => {
+  assert.equal(isVisibleInUpcomingSchedule({}), true);
+  assert.equal(isVisibleInUpcomingSchedule(undefined), true);
+  assert.equal(isVisibleInUpcomingSchedule({ Present: 2 }), false);
+  assert.equal(isVisibleInUpcomingSchedule({ Absent: 1 }), false);
 });
 
 test("upcoming sessions with attendance are ordered after unmarked sessions", () => {
