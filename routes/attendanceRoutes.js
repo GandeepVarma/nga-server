@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   markAttendance,
   getAttendance,
+  getMyAttendance,
   getTodaySummary,
   getAttendancePercentage,
   getLowAttendanceStudents,
@@ -14,10 +15,11 @@ const {
   saveScheduledAttendance,
   deleteScheduledClass,
 } = require("../controllers/scheduledClassController");
-const { protect, teacherOnly } = require("../middleware/auth");
+const { protect, teacherOnly, studentOnly } = require("../middleware/auth");
 const { requireFeature } = require("../middleware/featureAccess");
 
 router.post("/", protect, teacherOnly, requireFeature("attendance"), markAttendance);
+router.get("/my", protect, studentOnly, requireFeature("attendance"), getMyAttendance);
 router.get("/today-summary", protect, teacherOnly, requireFeature("attendance"), getTodaySummary);
 router.get("/low-attendance", protect, teacherOnly, requireFeature("attendance"), getLowAttendanceStudents);
 router.get("/percentage/:studentId", protect, requireFeature("attendance"), getAttendancePercentage);

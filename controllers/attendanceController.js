@@ -92,6 +92,19 @@ const getAttendance = asyncHandler(async (req, res) => {
   res.json({ success: true, count: records.length, data: records });
 });
 
+// @desc    Get the authenticated student's complete attendance history
+// @route   GET /api/attendance/my
+// @access  Student
+const getMyAttendance = asyncHandler(async (req, res) => {
+  const records = await Attendance.find(
+    academyFilter(req, { student: req.user._id })
+  )
+    .select("date class session status")
+    .sort({ date: 1, session: 1 });
+
+  res.json({ success: true, count: records.length, data: records });
+});
+
 // @desc    Today's attendance count (dashboard stat card), scoped by role
 // @route   GET /api/attendance/today-summary
 // @access  Staff (Admin or Teacher)
@@ -243,6 +256,7 @@ const getLowAttendanceStudents = asyncHandler(async (req, res) => {
 module.exports = {
   markAttendance,
   getAttendance,
+  getMyAttendance,
   getTodaySummary,
   getAttendancePercentage,
   getLowAttendanceStudents,
